@@ -1,0 +1,15 @@
+{
+    "files.associations": {
+        "*.sh": "shellscript",
+        "run.sh": "shellscript"
+    },
+    "files.defaultLanguage": "shellscript",
+    "[shellscript]": {
+        "editor.defaultFormatter": "foxundermoon.shell-format"
+    },
+    "shellcheck.enable": true,
+    "shellcheck.run": "onType",
+    "emmet.includeLanguages": {
+        "shellscript": "shellscript"
+    }
+}

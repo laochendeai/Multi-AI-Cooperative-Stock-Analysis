@@ -1,0 +1,11 @@
+{
+  "llm_config": {
+    "openai": "c2stcHJvai14anR2TEV5ZTlLR2ZMZjY0cE9lSXBjcEQxX3RraHpyWEh6alRUU3pVTnRZUHotWXlIWkdpcVdMSkZwZUtiT211TFQ0WnBoTVRBVFQzQmxia0ZKVTZONGQ0S0V2RVFSLS1xNjluVXY3bDhvWWJDN0xNcmstdS1KN05DMmRrQTBueUVXeGc3UGxJVWJjNVBHZkozWWZNVGhSRFYyd0E=",
+    "deepseek": "c2stYWM0OGVjNjk2ODgxNDY5MTkyZTdhNWZmNGJlODQwZDM=",
+    "google": "QUl6YVN5QzVMQmNkYm5iRUd4SGtBOUVmZ3pqRHFxRS1SeDhObXEw",
+    "moonshot": "c2stOVdScTR0clV4QklDRTNPRTJRaXFQQmVpeFVKTUdOTmR4WE5IVUxBWWF0Z0NwMzh2"
+  },
+  "custom_llm_providers": {},
+  "saved_time": "2025-08-02T22:13:22.716409",
+  "version": "1.0"
+}
