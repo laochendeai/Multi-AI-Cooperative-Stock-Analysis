@@ -1,17 +1,5 @@
 {
-  "market_analyst": "moonshot:moonshot-v1-8k",
-  "social_media_analyst": "moonshot:moonshot-v1-8k",
-  "news_analyst": "moonshot:moonshot-v1-8k",
-  "fundamentals_analyst": "moonshot:moonshot-v1-8k",
-  "bull_researcher": "moonshot:moonshot-v1-32k",
-  "bear_researcher": "google:gemini-pro",
-  "research_manager": "google:gemini-pro",
-  "trader": "deepseek:deepseek-chat",
-  "aggressive_debator": "deepseek:deepseek-chat",
-  "conservative_debator": "deepseek:deepseek-chat",
-  "neutral_debator": "deepseek:deepseek-chat",
-  "risk_manager": "deepseek:deepseek-chat",
-  "memory_manager": "deepseek:deepseek-chat",
-  "signal_processor": "deepseek:deepseek-chat",
-  "reflection_engine": "deepseek:deepseek-chat"
+  "social_media_analyst": "阿里百炼:qwen-turbo",
+  "fundamentals_analyst": "阿里百炼:qwen-turbo",
+  "news_analyst": "阿里百炼:qwen-turbo"
 }

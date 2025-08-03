@@ -28,6 +28,55 @@ class RealDataCollector:
         self.db_path.parent.mkdir(exist_ok=True)
         self.init_database()
 
+        # 常用股票代码到名称的映射（回退机制）
+        self.stock_name_mapping = {
+            "600519": "贵州茅台",
+            "000001": "平安银行",
+            "000002": "万科A",
+            "600036": "招商银行",
+            "600000": "浦发银行",
+            "000858": "五粮液",
+            "002415": "海康威视",
+            "600276": "恒瑞医药",
+            "000568": "泸州老窖",
+            "600887": "伊利股份",
+            "300750": "宁德时代",
+            "002594": "比亚迪",
+            "600328": "天房发展",
+            "600330": "恒顺醋业",
+            "002304": "洋河股份",
+            "000596": "古井贡酒",
+            "600809": "山西汾酒",
+            "000799": "酒鬼酒",
+            "600702": "舍得酒业"
+        }
+
+    def get_stock_name(self, symbol: str, raw_name: str = None) -> str:
+        """获取股票名称，带回退机制"""
+        # 1. 如果提供了原始名称且有效，检查是否为有效名称
+        if raw_name and str(raw_name).strip():
+            cleaned_name = str(raw_name).strip()
+
+            # 检查是否为无效格式
+            invalid_formats = [
+                symbol,                    # 名称等于代码
+                f"股票{symbol}",           # "股票600330"格式
+                "None",                    # 字符串"None"
+                "未知",                    # "未知"
+                "UNKNOWN",                 # "UNKNOWN"
+                ""                         # 空字符串
+            ]
+
+            if cleaned_name not in invalid_formats:
+                return cleaned_name
+
+        # 2. 从映射表获取
+        if symbol in self.stock_name_mapping:
+            return self.stock_name_mapping[symbol]
+
+        # 3. 最后回退：使用代码本身
+        return symbol
+
     def init_database(self):
         """初始化数据库"""
         try:
@@ -137,9 +186,13 @@ class RealDataCollector:
                 volume = int(stock_row['成交量'])
                 change_percent = float(stock_row['涨跌幅'])
 
+                # 获取股票名称，使用回退机制
+                raw_name = stock_row['名称']
+                stock_name = self.get_stock_name(symbol, raw_name)
+
                 stock_data = {
                     "symbol": symbol,
-                    "name": stock_row['名称'],
+                    "name": stock_name,
                     "price_data": {
                         "current_price": current_price,
                         "open": open_price,
@@ -441,15 +494,23 @@ class RealDataCollector:
     async def check_llm_internet_capability(self, provider: str, model: str, api_key: str) -> bool:
         """检查LLM是否支持联网搜索"""
         try:
-            # 测试提示词
-            test_prompt = "请搜索今天的日期和当前时间，并告诉我今天是几月几号。"
-
-            # 这里需要调用LLM API进行测试
-            # 简化实现，返回已知的支持情况
+            # 已知支持联网搜索的模型（基于官方文档）
             internet_capable_models = {
                 "openai": ["gpt-4", "gpt-4-turbo"],  # 部分OpenAI模型支持
-                "google": ["gemini-pro"],  # Google模型通常支持
+                "google": ["gemini-pro", "gemini-1.5-flash", "gemini-1.5-pro"],  # Google模型通常支持
                 "perplexity": ["pplx-7b-online", "pplx-70b-online"],  # Perplexity专门支持
+                "阿里百炼": [
+                    "qwen-max",           # 通义千问Max
+                    "qwen-plus",          # 通义千问-Plus
+                    "qwen-turbo",         # 通义千问Turbo
+                    "qwq-32b-preview"     # QwQ
+                ],
+                "dashscope": [
+                    "qwen-max",           # 通义千问Max
+                    "qwen-plus",          # 通义千问-Plus
+                    "qwen-turbo",         # 通义千问Turbo
+                    "qwq-32b-preview"     # QwQ
+                ],
             }
 
             if provider in internet_capable_models:
@@ -461,37 +522,263 @@ class RealDataCollector:
             logger.error(f"检查LLM联网能力失败: {e}")
             return False
 
+
+
+
+
 class EnhancedTradingAgentsApp:
     """增强版TradingAgents应用"""
-    
-    def __init__(self):
-        self.analysis_sessions = []
+
+    def __init__(self, db_path: str = "data/trading_data.db"):
+        """初始化应用"""
+        # 数据收集器
+        self.data_collector = RealDataCollector(db_path)
+
+        # 配置文件路径
         self.config_file = Path("config/llm_config.json")
         self.config_dir = Path("config")
         self.config_dir.mkdir(exist_ok=True)
 
-        # 初始化真实数据收集器
-        self.data_collector = RealDataCollector()
+        # 分析会话
+        self.analysis_sessions = []
 
-        # 加载保存的配置
+        # LLM配置
         self.llm_config = {}
         self.custom_llm_providers = {}
         self.load_saved_config()
 
-        # 加载环境变量配置（作为补充）
-        env_config = self.load_env_config()
-        for provider, key in env_config.items():
-            if provider not in self.llm_config:
-                self.llm_config[provider] = key
-
+        # 检查ChromaDB可用性
         self.chromadb_available = self.check_chromadb()
 
         # 智能体模型配置
-        self.agent_model_config = self.load_agent_model_config()
+        self.agent_model_config = {}
+        self.load_agent_model_config()
 
         # 通信日志
         self.communication_logs = []
         self.max_logs = 1000  # 最大保存1000条日志
+
+        # 最后一次分析结果（用于导出）
+        self.last_analysis_result = None
+
+        # 报告目录
+        self.reports_dir = Path("./reports")
+        self.reports_dir.mkdir(exist_ok=True)
+
+        # 重试和中断配置
+        self.retry_config = {
+            "max_data_retries": 3,      # 数据获取最大重试次数
+            "max_llm_retries": 2,       # LLM调用最大重试次数
+            "max_agent_retries": 2,     # 单个智能体最大重试次数
+            "retry_delay": 1.0,         # 重试延迟（秒）
+            "timeout_seconds": 30,      # 单次操作超时时间
+        }
+
+        # 分析状态跟踪
+        self.analysis_state = {
+            "is_running": False,
+            "current_step": "",
+            "retry_counts": {},
+            "failed_agents": [],
+            "should_interrupt": False
+        }
+
+    def reset_analysis_state(self):
+        """重置分析状态"""
+        self.analysis_state = {
+            "is_running": False,
+            "current_step": "",
+            "retry_counts": {},
+            "failed_agents": [],
+            "should_interrupt": False
+        }
+
+    def check_should_interrupt(self) -> bool:
+        """检查是否应该中断分析"""
+        return self.analysis_state.get("should_interrupt", False)
+
+    def interrupt_analysis(self, reason: str = "用户中断"):
+        """中断分析"""
+        self.analysis_state["should_interrupt"] = True
+        self.analysis_state["is_running"] = False
+        logger.warning(f"分析被中断: {reason}")
+
+    async def retry_with_backoff(self, func, *args, max_retries: int = 3, delay: float = 1.0, **kwargs):
+        """带退避的重试机制"""
+        last_exception = None
+
+        for attempt in range(max_retries + 1):
+            if self.check_should_interrupt():
+                raise InterruptedError("分析被用户中断")
+
+            try:
+                result = await func(*args, **kwargs)
+                if attempt > 0:
+                    logger.info(f"重试成功，尝试次数: {attempt + 1}")
+                return result
+
+            except Exception as e:
+                last_exception = e
+                if attempt < max_retries:
+                    wait_time = delay * (2 ** attempt)  # 指数退避
+                    logger.warning(f"第{attempt + 1}次尝试失败: {e}，{wait_time}秒后重试...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"重试{max_retries}次后仍然失败: {e}")
+
+        raise last_exception
+
+    def export_analysis_report(self, format_type="markdown") -> str:
+        """导出分析报告"""
+        if not self.last_analysis_result:
+            return "❌ 没有可导出的分析结果，请先进行股票分析"
+
+        result = self.last_analysis_result
+
+        if format_type == "markdown":
+            return self._export_markdown_report(result)
+        elif format_type == "text":
+            return self._export_text_report(result)
+        elif format_type == "json":
+            return self._export_json_report(result)
+        else:
+            return "❌ 不支持的导出格式"
+
+    def _export_markdown_report(self, result: Dict[str, Any]) -> str:
+        """导出Markdown格式报告"""
+        stock_name = result.get('stock_name', '未知')
+        report = f"""# 📊 TradingAgents 股票分析报告
+
+## 📋 基本信息
+- **股票代码**: {result['symbol']}
+- **股票名称**: {stock_name}
+- **分析时间**: {result['analysis_time']}
+- **报告生成**: TradingAgents 多智能体协作系统
+
+---
+
+## 📈 综合分析报告
+{result['comprehensive_report']}
+
+---
+
+## 📊 分析师团队报告
+
+### 📈 市场技术分析
+{result['market_analysis']}
+
+### 💭 社交情感分析
+{result['sentiment_analysis']}
+
+### 📰 新闻事件分析
+{result['news_analysis']}
+
+### 📊 基本面分析
+{result['fundamentals_analysis']}
+
+---
+
+## 🔬 多空辩论
+
+### 🐂 多头观点
+{result['bull_arguments']}
+
+### 🐻 空头观点
+{result['bear_arguments']}
+
+### 👨‍💼 投资建议
+{result['investment_recommendation']}
+
+---
+
+## 💼 交易策略
+{result['trading_strategy']}
+
+---
+
+## ⚠️ 风险评估
+{result['risk_assessment']}
+
+---
+
+## 🎯 最终决策
+{result['final_decision']}
+
+---
+
+*本报告由TradingAgents多智能体系统生成，仅供参考，不构成投资建议。投资有风险，入市需谨慎。*
+"""
+        return report
+
+    def _export_text_report(self, result: Dict[str, Any]) -> str:
+        """导出纯文本格式报告"""
+        stock_name = result.get('stock_name', '未知')
+        report = f"""TradingAgents 股票分析报告
+
+基本信息
+========
+股票代码: {result['symbol']}
+股票名称: {stock_name}
+分析时间: {result['analysis_time']}
+
+综合分析报告
+============
+{result['comprehensive_report']}
+
+分析师团队报告
+==============
+
+市场技术分析
+------------
+{result['market_analysis']}
+
+社交情感分析
+------------
+{result['sentiment_analysis']}
+
+新闻事件分析
+------------
+{result['news_analysis']}
+
+基本面分析
+----------
+{result['fundamentals_analysis']}
+
+多空辩论
+========
+
+多头观点
+--------
+{result['bull_arguments']}
+
+空头观点
+--------
+{result['bear_arguments']}
+
+投资建议
+--------
+{result['investment_recommendation']}
+
+交易策略
+========
+{result['trading_strategy']}
+
+风险评估
+========
+{result['risk_assessment']}
+
+最终决策
+========
+{result['final_decision']}
+
+免责声明: 本报告仅供参考，不构成投资建议。投资有风险，入市需谨慎。
+"""
+        return report
+
+    def _export_json_report(self, result: Dict[str, Any]) -> str:
+        """导出JSON格式报告"""
+        import json
+        return json.dumps(result, ensure_ascii=False, indent=2)
         
     def load_env_config(self) -> Dict[str, str]:
         """从环境变量加载LLM配置"""
@@ -652,7 +939,8 @@ class EnhancedTradingAgentsApp:
             "deepseek": ["deepseek-chat", "deepseek-coder"],
             "openai": ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo", "gpt-4o", "gpt-4o-mini"],
             "google": ["gemini-pro", "gemini-pro-vision", "gemini-1.5-pro", "gemini-1.5-flash"],
-            "moonshot": ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"]
+            "moonshot": ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
+            "阿里百炼": ["qwen-max", "qwen-plus", "qwen-turbo", "qwq-32b-preview"]
         }
 
         # 添加自定义提供商的模型
@@ -669,6 +957,8 @@ class EnhancedTradingAgentsApp:
             "anthropic": ["claude-3-sonnet-20240229", "claude-3-opus-20240229", "claude-3-haiku-20240307"],
             "通义千问": ["qwen-turbo", "qwen-plus", "qwen-max", "qwen-max-longcontext"],
             "qwen": ["qwen-turbo", "qwen-plus", "qwen-max", "qwen-max-longcontext"],
+            "阿里百炼": ["qwen-max", "qwen-plus", "qwen-turbo", "qwq-32b-preview"],
+            "dashscope": ["qwen-max", "qwen-plus", "qwen-turbo", "qwq-32b-preview"],
             "文心一言": ["ernie-bot-turbo", "ernie-bot", "ernie-bot-4"],
             "ernie": ["ernie-bot-turbo", "ernie-bot", "ernie-bot-4"],
             "baidu": ["ernie-bot-turbo", "ernie-bot", "ernie-bot-4"],
@@ -953,33 +1243,64 @@ class EnhancedTradingAgentsApp:
             }
 
     async def _real_agent_analysis(self, symbol: str, depth: str, analysts: List[str]) -> Dict[str, Any]:
-        """真实的智能体分析流程"""
+        """真实的智能体分析流程（带中断机制）"""
         try:
             start_time = datetime.now()
+            self.analysis_state["is_running"] = True
+            self.reset_analysis_state()
+            self.analysis_state["is_running"] = True
 
             # 1. 数据收集阶段
             logger.info("📊 阶段1: 数据收集")
             stock_data = await self._collect_stock_data(symbol)
 
+            if "error" in stock_data:
+                if stock_data.get("interrupted"):
+                    return {"status": "interrupted", "message": "分析被用户中断"}
+                else:
+                    return {"status": "failed", "error": stock_data["error"], "stage": "数据收集"}
+
+            if self.check_should_interrupt():
+                return {"status": "interrupted", "message": "分析被用户中断"}
+
             # 2. 分析师团队分析
             logger.info("👥 阶段2: 分析师团队分析")
             analyst_results = await self._run_analyst_team(symbol, stock_data)
+
+            if "error" in analyst_results:
+                if analyst_results.get("interrupted"):
+                    return {"status": "interrupted", "message": "分析被用户中断"}
+
+            if self.check_should_interrupt():
+                return {"status": "interrupted", "message": "分析被用户中断"}
 
             # 3. 研究团队辩论
             logger.info("🔬 阶段3: 研究团队辩论")
             research_results = await self._run_research_team(symbol, analyst_results)
 
+            if self.check_should_interrupt():
+                return {"status": "interrupted", "message": "分析被用户中断"}
+
             # 4. 交易策略制定
             logger.info("💼 阶段4: 交易策略制定")
             trading_strategy = await self._run_trader_analysis(symbol, research_results)
+
+            if self.check_should_interrupt():
+                return {"status": "interrupted", "message": "分析被用户中断"}
 
             # 5. 风险管理评估
             logger.info("⚠️ 阶段5: 风险管理评估")
             risk_assessment = await self._run_risk_management(symbol, trading_strategy)
 
+            if self.check_should_interrupt():
+                return {"status": "interrupted", "message": "分析被用户中断"}
+
             # 6. 最终决策
             logger.info("🎯 阶段6: 最终决策制定")
             final_decision = await self._make_final_decision(symbol, risk_assessment)
+
+            if self.check_should_interrupt():
+                return {"status": "interrupted", "message": "分析被用户中断"}
 
             # 7. 反思和学习
             logger.info("🔄 阶段7: 反思和学习")
@@ -1272,19 +1593,95 @@ class EnhancedTradingAgentsApp:
             ])
         return history
 
+    def get_report_history(self) -> List[Dict[str, Any]]:
+        """获取报告历史列表"""
+        try:
+            history = []
+
+            # 获取所有报告文件
+            for file_path in self.reports_dir.glob("*"):
+                if file_path.is_file() and file_path.suffix in ['.md', '.txt', '.json']:
+                    try:
+                        # 解析文件名: 股票代码_股票名称_时间戳.扩展名
+                        name_parts = file_path.stem.split('_')
+                        if len(name_parts) >= 3:
+                            symbol = name_parts[0]
+                            stock_name = '_'.join(name_parts[1:-1])  # 股票名称可能包含下划线
+                            timestamp_str = name_parts[-1]
+
+                            # 解析时间戳
+                            try:
+                                timestamp = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+                            except ValueError:
+                                # 如果时间戳格式不对，使用文件修改时间
+                                timestamp = datetime.fromtimestamp(file_path.stat().st_mtime)
+
+                            # 获取文件大小
+                            file_size = file_path.stat().st_size
+
+                            history.append({
+                                "file_path": str(file_path),
+                                "filename": file_path.name,
+                                "symbol": symbol,
+                                "stock_name": stock_name,
+                                "timestamp": timestamp,
+                                "format": file_path.suffix[1:],  # 去掉点号
+                                "size": file_size,
+                                "display_name": f"{symbol}({stock_name}) - {timestamp.strftime('%Y-%m-%d %H:%M:%S')}"
+                            })
+                    except Exception as e:
+                        logger.warning(f"解析文件 {file_path.name} 失败: {e}")
+                        continue
+
+            # 按时间倒序排列（最新的在前）
+            history.sort(key=lambda x: x["timestamp"], reverse=True)
+
+            return history
+
+        except Exception as e:
+            logger.error(f"获取报告历史失败: {e}")
+            return []
+
+    def load_analysis_report(self, file_path: str) -> str:
+        """加载分析报告内容"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            return content
+        except Exception as e:
+            logger.error(f"加载报告文件失败: {e}")
+            return f"❌ 无法加载报告文件: {str(e)}"
+
+    def delete_analysis_report(self, file_path: str) -> bool:
+        """删除分析报告"""
+        try:
+            Path(file_path).unlink()
+            logger.info(f"已删除报告文件: {file_path}")
+            return True
+        except Exception as e:
+            logger.error(f"删除报告文件失败: {e}")
+            return False
+
     # ==================== 真实智能体调用方法 ====================
 
     async def _collect_stock_data(self, symbol: str) -> Dict[str, Any]:
-        """数据收集阶段 - 使用真实数据"""
+        """数据收集阶段 - 使用真实数据（带重试机制）"""
         try:
             logger.info(f"开始收集股票 {symbol} 的真实数据...")
+            self.analysis_state["current_step"] = f"获取股票数据: {symbol}"
 
-            # 使用真实数据收集器获取数据
-            real_data = await self.data_collector.get_real_stock_data(symbol)
-
-            if "error" in real_data:
-                logger.error(f"获取真实数据失败: {real_data['error']}")
+            # 使用重试机制获取股票数据
+            async def get_data():
+                real_data = await self.data_collector.get_real_stock_data(symbol)
+                if "error" in real_data:
+                    raise ValueError(f"获取股票数据失败: {real_data['error']}")
                 return real_data
+
+            real_data = await self.retry_with_backoff(
+                get_data,
+                max_retries=self.retry_config["max_data_retries"],
+                delay=self.retry_config["retry_delay"]
+            )
 
             logger.info(f"成功收集股票 {symbol} 的真实数据")
             logger.info(f"当前价格: {real_data['price_data']['current_price']}")
@@ -1293,6 +1690,9 @@ class EnhancedTradingAgentsApp:
 
             return real_data
 
+        except InterruptedError as e:
+            logger.warning(f"数据收集被中断: {e}")
+            return {"error": "数据收集被用户中断", "interrupted": True}
         except Exception as e:
             logger.error(f"数据收集失败: {e}")
             return {"error": f"数据收集失败: {str(e)}"}
@@ -1314,24 +1714,63 @@ class EnhancedTradingAgentsApp:
             return False
 
     async def _run_analyst_team(self, symbol: str, stock_data: Dict[str, Any]) -> Dict[str, Any]:
-        """运行分析师团队"""
+        """运行分析师团队（带重试机制）"""
         try:
             results = {}
+            failed_agents = []
 
-            # 1. 市场分析师
-            results["market_analyst"] = await self._call_market_analyst(symbol, stock_data)
+            # 分析师配置
+            analysts = [
+                ("market_analyst", "市场分析师", self._call_market_analyst),
+                ("sentiment_analyst", "情感分析师", self._call_sentiment_analyst),
+                ("news_analyst", "新闻分析师", self._call_news_analyst),
+                ("fundamentals_analyst", "基本面分析师", self._call_fundamentals_analyst)
+            ]
 
-            # 2. 情感分析师
-            results["sentiment_analyst"] = await self._call_sentiment_analyst(symbol, stock_data)
+            for agent_id, agent_name, agent_func in analysts:
+                if self.check_should_interrupt():
+                    logger.warning("分析师团队运行被中断")
+                    break
 
-            # 3. 新闻分析师
-            results["news_analyst"] = await self._call_news_analyst(symbol, stock_data)
+                self.analysis_state["current_step"] = f"运行{agent_name}"
+                logger.info(f"开始运行{agent_name}...")
 
-            # 4. 基本面分析师
-            results["fundamentals_analyst"] = await self._call_fundamentals_analyst(symbol, stock_data)
+                try:
+                    # 使用重试机制调用分析师
+                    result = await self.retry_with_backoff(
+                        agent_func,
+                        symbol,
+                        stock_data,
+                        max_retries=self.retry_config["max_agent_retries"],
+                        delay=self.retry_config["retry_delay"]
+                    )
+
+                    # 验证结果
+                    if not result or "error" in str(result):
+                        raise ValueError(f"{agent_name}返回无效结果")
+
+                    results[agent_id] = result
+                    logger.info(f"{agent_name}运行成功")
+
+                except Exception as e:
+                    logger.error(f"{agent_name}运行失败: {e}")
+                    failed_agents.append(agent_name)
+                    results[agent_id] = {
+                        "error": f"{agent_name}运行失败: {str(e)}",
+                        "analysis": f"❌ {agent_name}暂时无法提供分析，请稍后重试"
+                    }
+
+            # 记录失败的智能体
+            self.analysis_state["failed_agents"] = failed_agents
+
+            if failed_agents:
+                logger.warning(f"以下智能体运行失败: {failed_agents}")
 
             return results
 
+        except InterruptedError as e:
+            logger.warning(f"分析师团队运行被中断: {e}")
+            return {"error": "分析师团队运行被用户中断", "interrupted": True}
         except Exception as e:
             logger.error(f"分析师团队运行失败: {e}")
             return {"error": str(e)}
@@ -1343,17 +1782,24 @@ class EnhancedTradingAgentsApp:
             model_config = self.agent_model_config.get("market_analyst", "deepseek:deepseek-chat")
             provider, model = model_config.split(":", 1)
 
+            # 获取股票名称，使用回退机制
+            raw_name = stock_data.get('name', '')
+            stock_name = self.data_collector.get_stock_name(symbol, raw_name)
+
             # 构建提示
             prompt = f"""
-你是专业的市场技术分析师。请分析股票 {symbol} 的技术指标和价格走势。
+你是专业的市场技术分析师。请分析股票{symbol}（{stock_name}）的技术指标和价格走势。
+
+**重要提醒**: 请在分析中始终使用正确的股票代码{symbol}和股票名称{stock_name}。
 
 当前数据:
-- 价格: {stock_data['price_data']['current_price']}
+- 股票: {symbol}（{stock_name}）
+- 价格: {stock_data['price_data']['current_price']}元
 - 涨跌幅: {stock_data['price_data']['change_percent']}%
 - RSI: {stock_data['technical_indicators']['rsi']}
 - MACD: {stock_data['technical_indicators']['macd']}
-- MA5: {stock_data['technical_indicators']['ma5']}
-- MA20: {stock_data['technical_indicators']['ma20']}
+- MA5: {stock_data['technical_indicators']['ma5']}元
+- MA20: {stock_data['technical_indicators']['ma20']}元
 
 请提供:
 1. 技术趋势分析
@@ -1361,7 +1807,7 @@ class EnhancedTradingAgentsApp:
 3. 短期走势预测
 4. 交易信号建议
 
-请用专业、简洁的语言回答，控制在200字以内。
+请用专业、简洁的语言回答，控制在200字以内。务必在回答中使用正确的股票代码{symbol}和名称{stock_name}。
 """
 
             # 调用LLM
@@ -1388,18 +1834,25 @@ class EnhancedTradingAgentsApp:
             # 检查LLM是否支持联网搜索
             has_internet = await self._check_llm_internet_access("social_media_analyst")
 
+            # 获取股票名称，使用回退机制
+            raw_name = stock_data.get('name', '')
+            stock_name = self.data_collector.get_stock_name(symbol, raw_name)
+
             if has_internet:
                 # 使用联网搜索获取真实社交媒体数据
                 prompt = f"""
-你是专业的市场情感分析师。请搜索并分析股票 {symbol} 在今天的社交媒体情绪和投资者情感。
+你是专业的市场情感分析师。请搜索并分析股票{symbol}（{stock_name}）在今天的社交媒体情绪和投资者情感。
 
-请搜索以下平台的最新讨论:
+**重要提醒**: 请在分析中始终使用正确的股票代码{symbol}和股票名称{stock_name}，不要使用其他股票的信息。
+
+请搜索以下平台关于{symbol}（{stock_name}）的最新讨论:
 1. 微博、雪球等投资社区
 2. 财经新闻评论区
 3. 投资论坛讨论
 
 基于搜索到的真实数据和当前市场表现:
-- 当前价格: {stock_data['price_data']['current_price']}
+- 股票: {symbol}（{stock_name}）
+- 当前价格: {stock_data['price_data']['current_price']}元
 - 股价变化: {stock_data['price_data']['change_percent']}%
 - 成交量: {stock_data['price_data']['volume']}
 
@@ -1409,7 +1862,7 @@ class EnhancedTradingAgentsApp:
 3. 热门讨论话题和情感驱动因素
 4. 情感对价格走势的影响预测
 
-请基于真实搜索数据回答，控制在300字以内。
+请基于真实搜索数据回答，控制在300字以内。务必在回答中使用正确的股票代码{symbol}和名称{stock_name}。
 """
             else:
                 # 提示用户切换支持联网的模型
@@ -1448,18 +1901,22 @@ class EnhancedTradingAgentsApp:
 
             if has_internet:
                 # 使用联网搜索获取真实新闻数据
-                stock_name = stock_data.get('name', symbol)
+                raw_name = stock_data.get('name', '')
+                stock_name = self.data_collector.get_stock_name(symbol, raw_name)
                 prompt = f"""
-你是专业的新闻分析师。请搜索并分析今天影响股票 {symbol}({stock_name}) 的最新新闻和宏观经济因素。
+你是专业的新闻分析师。请搜索并分析今天影响股票{symbol}（{stock_name}）的最新新闻和宏观经济因素。
 
-请搜索以下类型的最新新闻:
+**重要提醒**: 请在分析中始终使用正确的股票代码{symbol}和股票名称{stock_name}，不要使用其他股票的信息。
+
+请搜索以下类型关于{symbol}（{stock_name}）的最新新闻:
 1. 公司相关新闻公告
 2. 行业政策和监管变化
 3. 宏观经济数据发布
 4. 国际市场影响因素
 
 当前市场状况:
-- 当前价格: {stock_data['price_data']['current_price']}
+- 股票: {symbol}（{stock_name}）
+- 当前价格: {stock_data['price_data']['current_price']}元
 - 股价变化: {stock_data['price_data']['change_percent']}%
 - 市盈率: {stock_data['market_data']['pe_ratio']}
 - 市净率: {stock_data['market_data']['pb_ratio']}
@@ -1470,7 +1927,7 @@ class EnhancedTradingAgentsApp:
 3. 宏观经济环境对该股的影响
 4. 新闻事件对股价的潜在影响预测
 
-请基于真实搜索数据回答，控制在300字以内。
+请基于真实搜索数据回答，控制在300字以内。务必在回答中使用正确的股票代码{symbol}和名称{stock_name}。
 """
             else:
                 # 提示用户切换支持联网的模型
@@ -1509,11 +1966,14 @@ class EnhancedTradingAgentsApp:
 
             if has_internet:
                 # 使用联网搜索获取真实财务数据
-                stock_name = stock_data.get('name', symbol)
+                raw_name = stock_data.get('name', '')
+                stock_name = self.data_collector.get_stock_name(symbol, raw_name)
                 prompt = f"""
-你是专业的基本面分析师。请搜索并分析股票 {symbol}({stock_name}) 的最新财务数据和基本面指标。
+你是专业的基本面分析师。请搜索并分析股票{symbol}（{stock_name}）的最新财务数据和基本面指标。
 
-请搜索以下最新财务信息:
+**重要提醒**: 请在分析中始终使用正确的股票代码{symbol}和股票名称{stock_name}，不要使用其他股票的信息。
+
+请搜索以下关于{symbol}（{stock_name}）的最新财务信息:
 1. 最新季度财报数据
 2. 年度财务报表
 3. 现金流量表
@@ -1521,7 +1981,8 @@ class EnhancedTradingAgentsApp:
 5. 行业对比数据
 
 当前市场数据:
-- 当前价格: {stock_data['price_data']['current_price']}
+- 股票: {symbol}（{stock_name}）
+- 当前价格: {stock_data['price_data']['current_price']}元
 - 市盈率: {stock_data['market_data']['pe_ratio']}
 - 市净率: {stock_data['market_data']['pb_ratio']}
 - 市值: {stock_data['price_data'].get('market_cap', '未知')}
@@ -1533,7 +1994,7 @@ class EnhancedTradingAgentsApp:
 4. 行业地位和竞争优势
 5. 估值水平和投资价值判断
 
-请基于真实财务数据回答，控制在300字以内。
+请基于真实财务数据回答，控制在300字以内。务必在回答中使用正确的股票代码{symbol}和名称{stock_name}。
 """
             else:
                 # 提示用户切换支持联网的模型
@@ -1590,21 +2051,30 @@ class EnhancedTradingAgentsApp:
             # 汇总分析师观点
             market_view = analyst_results.get("market_analyst", {}).get("analysis", "")
             sentiment_view = analyst_results.get("sentiment_analyst", {}).get("analysis", "")
+            news_view = analyst_results.get("news_analyst", {}).get("analysis", "")
+            fundamentals_view = analyst_results.get("fundamentals_analyst", {}).get("analysis", "")
+
+            # 使用数据收集器的股票名称获取方法
+            stock_name = self.data_collector.get_stock_name(symbol)
 
             prompt = f"""
-你是专业的多头研究员。基于分析师团队的报告，请为股票 {symbol} 提供看涨论据。
+你是专业的多头研究员。基于分析师团队的报告，请为股票{symbol}（{stock_name}）提供看涨论据。
 
-分析师观点:
-- 技术分析: {market_view[:100]}...
-- 情感分析: {sentiment_view[:100]}...
+**重要提醒**: 请在分析中始终使用正确的股票代码{symbol}和股票名称{stock_name}。
 
-请提供:
+分析师观点摘要:
+- 技术分析: {market_view[:150]}...
+- 情感分析: {sentiment_view[:150]}...
+- 新闻分析: {news_view[:150]}...
+- 基本面分析: {fundamentals_view[:150]}...
+
+请基于以上分析提供:
 1. 主要看涨理由
 2. 上涨催化剂
 3. 目标价位预期
 4. 投资机会分析
 
-请用积极、专业的语言回答，控制在200字以内。
+请用积极、专业的语言回答，控制在200字以内。务必在回答中使用正确的股票代码{symbol}和名称{stock_name}。
 """
 
             response = await self._call_llm(provider, model, prompt, "bull_researcher")
@@ -1642,6 +2112,8 @@ class EnhancedTradingAgentsApp:
                 response = await self._call_google(api_key, model, prompt)
             elif provider == "moonshot":
                 response = await self._call_moonshot(api_key, model, prompt)
+            elif provider in ["阿里百炼", "dashscope"]:
+                response = await self._call_dashscope(api_key, model, prompt, agent_id)
             else:
                 # 自定义提供商
                 custom_config = self.custom_llm_providers.get(provider, {})
@@ -1840,6 +2312,97 @@ class EnhancedTradingAgentsApp:
         except Exception as e:
             logger.error(f"Moonshot API调用失败: {e}")
             return f"Moonshot分析不可用: {str(e)}"
+
+    async def _call_dashscope(self, api_key: str, model: str, prompt: str, agent_id: str) -> str:
+        """调用阿里百炼DashScope API（使用OpenAI兼容接口，支持联网搜索）"""
+        try:
+            import httpx
+
+            # 检查是否需要联网搜索
+            need_internet = agent_id in ["social_media_analyst", "news_analyst", "fundamentals_analyst"]
+
+            # 阿里百炼官方OpenAI兼容接口
+            base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            url = f"{base_url}/chat/completions"
+
+            # 构建请求头
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+
+            # 构建请求数据
+            data = {
+                "model": model,
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 2000
+            }
+
+            # 如果需要联网搜索，添加搜索参数
+            if need_internet:
+                # 使用阿里百炼官方推荐的联网搜索配置
+                data["enable_search"] = True
+                logger.info(f"为智能体 {agent_id} 启用联网搜索")
+
+            # 发送HTTP请求
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(url, headers=headers, json=data)
+                response.raise_for_status()
+
+                result = response.json()
+
+                # 解析响应
+                if "choices" in result and len(result["choices"]) > 0:
+                    content = result["choices"][0]["message"]["content"]
+
+                    # 检查是否有搜索信息（如果API返回的话）
+                    if need_internet and "search_info" in result:
+                        search_info = result["search_info"]
+                        if "search_results" in search_info:
+                            search_sources = []
+                            for result_item in search_info["search_results"][:3]:
+                                title = result_item.get("title", "搜索结果")
+                                url_link = result_item.get("url", "#")
+                                search_sources.append(f"[{title}]({url_link})")
+
+                            content += f"\n\n📡 **搜索来源**:\n" + "\n".join(search_sources)
+
+                    return content
+                else:
+                    logger.error(f"阿里百炼API响应格式异常: {result}")
+                    return "❌ 阿里百炼API响应格式异常"
+
+        except httpx.HTTPStatusError as e:
+            error_text = ""
+            try:
+                error_text = e.response.text
+            except:
+                error_text = "无法获取错误详情"
+
+            logger.error(f"阿里百炼API HTTP错误: {e.response.status_code} - {error_text}")
+
+            if e.response.status_code == 401:
+                return "❌ 阿里百炼API密钥无效，请检查配置"
+            elif e.response.status_code == 403:
+                return "❌ 阿里百炼API访问被拒绝，请检查API密钥权限"
+            elif e.response.status_code == 429:
+                return "❌ 阿里百炼API请求频率过高，请稍后重试"
+            elif e.response.status_code == 400:
+                return f"❌ 阿里百炼API请求参数错误: {error_text[:200]}"
+            else:
+                return f"❌ 阿里百炼API调用失败: HTTP {e.response.status_code} - {error_text[:200]}"
+        except httpx.TimeoutException:
+            logger.error("阿里百炼API调用超时")
+            return "❌ 阿里百炼API调用超时，请稍后重试"
+        except httpx.RequestError as e:
+            logger.error(f"阿里百炼API网络请求错误: {e}")
+            return f"❌ 阿里百炼API网络请求错误: {str(e)}"
+        except Exception as e:
+            logger.error(f"阿里百炼API调用失败: {e}")
+            return f"❌ 阿里百炼API调用异常: {str(e)}"
 
     async def _call_custom_llm(self, api_key: str, base_url: str, model: str, prompt: str) -> str:
         """调用自定义LLM API"""
@@ -2128,16 +2691,33 @@ class EnhancedTradingAgentsApp:
             model_config = self.agent_model_config.get("bear_researcher", "deepseek:deepseek-chat")
             provider, model = model_config.split(":", 1)
 
-            prompt = f"""
-你是专业的空头研究员。基于分析师团队的报告，请为股票 {symbol} 提供看跌论据。
+            # 汇总分析师观点
+            market_view = analyst_results.get("market_analyst", {}).get("analysis", "")
+            sentiment_view = analyst_results.get("sentiment_analyst", {}).get("analysis", "")
+            news_view = analyst_results.get("news_analyst", {}).get("analysis", "")
+            fundamentals_view = analyst_results.get("fundamentals_analyst", {}).get("analysis", "")
 
-请提供:
+            # 使用数据收集器的股票名称获取方法
+            stock_name = self.data_collector.get_stock_name(symbol)
+
+            prompt = f"""
+你是专业的空头研究员。基于分析师团队的报告，请为股票{symbol}（{stock_name}）提供看跌论据。
+
+**重要提醒**: 请在分析中始终使用正确的股票代码{symbol}和股票名称{stock_name}。
+
+分析师观点摘要:
+- 技术分析: {market_view[:150]}...
+- 情感分析: {sentiment_view[:150]}...
+- 新闻分析: {news_view[:150]}...
+- 基本面分析: {fundamentals_view[:150]}...
+
+请基于以上分析提供:
 1. 主要看跌理由
 2. 下跌风险因素
 3. 目标价位预期
 4. 风险警示
 
-请用谨慎、专业的语言回答，控制在200字以内。
+请用谨慎、专业的语言回答，控制在200字以内。务必在回答中使用正确的股票代码{symbol}和名称{stock_name}。
 """
 
             response = await self._call_llm(provider, model, prompt, "bear_researcher")
@@ -2163,12 +2743,17 @@ class EnhancedTradingAgentsApp:
             bull_view = research_results.get("bull_researcher", {}).get("analysis", "")
             bear_view = research_results.get("bear_researcher", {}).get("analysis", "")
 
+            # 使用数据收集器的股票名称获取方法
+            stock_name = self.data_collector.get_stock_name(symbol)
+
             prompt = f"""
-你是研究经理。基于多空研究员的辩论，请对股票 {symbol} 做出综合投资建议。
+你是研究经理。基于多空研究员的辩论，请对股票{symbol}（{stock_name}）做出综合投资建议。
+
+**重要提醒**: 请在分析中始终使用正确的股票代码{symbol}和股票名称{stock_name}。
 
 多空观点:
-- 多头观点: {bull_view[:150]}...
-- 空头观点: {bear_view[:150]}...
+- 多头观点: {bull_view[:200]}...
+- 空头观点: {bear_view[:200]}...
 
 请提供:
 1. 综合投资建议
@@ -2176,7 +2761,7 @@ class EnhancedTradingAgentsApp:
 3. 投资策略建议
 4. 时机把握
 
-请用平衡、专业的语言回答，控制在200字以内。
+请用平衡、专业的语言回答，控制在200字以内。务必在回答中使用正确的股票代码{symbol}和名称{stock_name}。
 """
 
             response = await self._call_llm(provider, model, prompt, "research_manager")
@@ -2357,8 +2942,8 @@ class EnhancedTradingAgentsApp:
         return {
             "llm_providers": len(self.llm_config),
             "configured_providers": list(self.llm_config.keys()),
-            "chromadb_available": self.chromadb_available,
-            "total_analyses": len(self.analysis_sessions),
+            "chromadb_available": getattr(self, 'chromadb_available', False),
+            "total_analyses": len(getattr(self, 'analysis_sessions', [])),
             "system_ready": len(self.llm_config) > 0
         }
 
@@ -2371,9 +2956,12 @@ def _get_model_choices():
     models = app.get_available_models()
 
     for provider, model_list in models.items():
-        if provider in app.llm_config:  # 只显示已配置的提供商
-            for model in model_list:
+        # 显示所有提供商，但标注配置状态
+        for model in model_list:
+            if provider in app.llm_config:
                 choices.append(f"{provider}:{model}")
+            else:
+                choices.append(f"{provider}:{model} (未配置)")
 
     return choices if choices else ["deepseek:deepseek-chat"]
 
@@ -2432,7 +3020,10 @@ def create_enhanced_interface():
                         )
 
                         # 执行按钮
-                        analyze_btn = gr.Button("🚀 开始全面分析", variant="primary", size="lg")
+                        with gr.Row():
+                            analyze_btn = gr.Button("🚀 开始全面分析", variant="primary", size="lg")
+                            interrupt_btn = gr.Button("⏹️ 中断分析", variant="stop", size="lg", visible=False)
+                            export_btn = gr.Button("📄 导出报告", variant="secondary", size="lg")
 
                         # 状态显示
                         status_display = gr.Textbox(
@@ -2440,6 +3031,26 @@ def create_enhanced_interface():
                             value="🟢 系统就绪",
                             interactive=False
                         )
+
+                        # 重试配置
+                        with gr.Accordion("🔧 重试配置", open=False):
+                            with gr.Row():
+                                max_data_retries = gr.Slider(
+                                    minimum=1, maximum=5, value=3, step=1,
+                                    label="数据获取重试次数",
+                                    info="获取股票数据失败时的最大重试次数"
+                                )
+                                max_llm_retries = gr.Slider(
+                                    minimum=1, maximum=3, value=2, step=1,
+                                    label="LLM调用重试次数",
+                                    info="LLM调用失败时的最大重试次数"
+                                )
+
+                            retry_delay = gr.Slider(
+                                minimum=0.5, maximum=5.0, value=1.0, step=0.5,
+                                label="重试延迟（秒）",
+                                info="重试之间的等待时间"
+                            )
 
                         # 系统状态
                         gr.Markdown("### 📡 系统状态")
@@ -2494,6 +3105,79 @@ def create_enhanced_interface():
                             with gr.TabItem("⚠️ 风险评估"):
                                 risk_assessment_output = gr.Markdown(value="暂无数据")
                                 final_decision_output = gr.Markdown(value="暂无数据")
+
+                            # 导出报告
+                            with gr.TabItem("📄 导出报告"):
+                                gr.Markdown("## 📊 分析报告导出")
+                                gr.Markdown("导出完整的分析报告，包含所有智能体的分析结果。")
+
+                                with gr.Row():
+                                    export_format = gr.Radio(
+                                        choices=["markdown", "text", "json"],
+                                        value="markdown",
+                                        label="导出格式",
+                                        info="选择导出报告的格式"
+                                    )
+
+                                with gr.Row():
+                                    export_report_btn = gr.Button("📄 生成报告", variant="primary", size="lg")
+                                    download_btn = gr.DownloadButton("💾 下载报告", variant="secondary", size="lg")
+
+                                export_status = gr.Textbox(
+                                    label="导出状态",
+                                    value="请先完成股票分析，然后选择格式生成报告",
+                                    interactive=False
+                                )
+
+                                export_preview = gr.Textbox(
+                                    label="报告预览",
+                                    value="",
+                                    lines=20,
+                                    max_lines=30,
+                                    interactive=False,
+                                    show_copy_button=True
+                                )
+
+                            # 分析历史
+                            with gr.TabItem("📚 分析历史"):
+                                gr.Markdown("## 📋 历史分析报告")
+                                gr.Markdown("查看和管理之前生成的分析报告。")
+
+                                with gr.Row():
+                                    refresh_history_btn = gr.Button("🔄 刷新列表", variant="secondary", size="sm")
+                                    clear_history_btn = gr.Button("🗑️ 清空历史", variant="stop", size="sm")
+
+                                # 历史列表
+                                history_list = gr.Dropdown(
+                                    label="历史报告",
+                                    choices=[],
+                                    value=None,
+                                    info="选择要查看的历史报告"
+                                )
+
+                                # 报告信息
+                                with gr.Row():
+                                    with gr.Column(scale=1):
+                                        report_info = gr.Textbox(
+                                            label="报告信息",
+                                            value="",
+                                            lines=3,
+                                            interactive=False
+                                        )
+                                    with gr.Column(scale=1):
+                                        with gr.Row():
+                                            view_report_btn = gr.Button("👁️ 查看报告", variant="primary", size="sm")
+                                            delete_report_btn = gr.Button("🗑️ 删除报告", variant="stop", size="sm")
+
+                                # 报告内容显示
+                                history_report_content = gr.Textbox(
+                                    label="报告内容",
+                                    value="",
+                                    lines=25,
+                                    max_lines=40,
+                                    interactive=False,
+                                    show_copy_button=True
+                                )
 
             # LLM配置界面
             with gr.TabItem("⚙️ LLM配置"):
@@ -2561,6 +3245,21 @@ def create_enhanced_interface():
                                         moonshot_test_btn = gr.Button("测试连接", size="sm")
                                         moonshot_save_btn = gr.Button("💾 保存", size="sm", variant="secondary")
                                     moonshot_status = gr.Textbox(label="状态", value="已配置" if "moonshot" in app.llm_config else "未配置", interactive=False)
+
+                                # 阿里百炼配置
+                                with gr.Group():
+                                    gr.Markdown("#### 🔥 阿里百炼 (支持联网搜索)")
+                                    dashscope_key = gr.Textbox(
+                                        label="DashScope API Key",
+                                        type="password",
+                                        placeholder="sk-...",
+                                        value="●●●●●●●●●●●●" if "阿里百炼" in app.llm_config else ""
+                                    )
+                                    with gr.Row():
+                                        dashscope_test_btn = gr.Button("测试连接", size="sm")
+                                        dashscope_save_btn = gr.Button("💾 保存", size="sm", variant="secondary")
+                                    dashscope_status = gr.Textbox(label="状态", value="已配置" if "阿里百炼" in app.llm_config else "未配置", interactive=False)
+                                    gr.Markdown("💡 **支持联网搜索**: 情感分析师、新闻分析师、基本面分析师将自动启用实时搜索")
 
                                 # 批量操作
                                 with gr.Group():
@@ -2986,12 +3685,46 @@ def create_enhanced_interface():
 
         # 事件处理函数
         def run_enhanced_analysis(symbol, depth, market_checked, sentiment_checked,
-                                news_checked, fundamentals_checked, use_real_llm):
-            """运行增强分析"""
+                                news_checked, fundamentals_checked, use_real_llm,
+                                max_data_retries, max_llm_retries, retry_delay):
+            """运行增强分析（带重试配置）"""
             if not symbol:
                 return ("❌ 请输入股票代码", "暂无数据", "暂无数据", "暂无数据",
                        "暂无数据", "暂无数据", "暂无数据", "暂无数据", "暂无数据", "暂无数据", "暂无数据")
 
+            # 更新重试配置
+            app.retry_config.update({
+                "max_data_retries": int(max_data_retries),
+                "max_llm_retries": int(max_llm_retries),
+                "retry_delay": float(retry_delay)
+            })
+
+            # 调用核心分析逻辑
+            return run_analysis_with_retry(symbol, depth, market_checked, sentiment_checked,
+                                         news_checked, fundamentals_checked, use_real_llm)
+
+        def interrupt_analysis():
+            """中断分析"""
+            app.interrupt_analysis("用户手动中断")
+            return "⏹️ 分析已中断，请重新输入股票代码开始新的分析"
+
+        def update_analysis_status():
+            """更新分析状态"""
+            if app.analysis_state["is_running"]:
+                current_step = app.analysis_state.get("current_step", "运行中...")
+                failed_agents = app.analysis_state.get("failed_agents", [])
+
+                status = f"🔄 {current_step}"
+                if failed_agents:
+                    status += f" (失败: {', '.join(failed_agents)})"
+
+                return status
+            else:
+                return "🟢 系统就绪"
+
+        def run_analysis_with_retry(symbol, depth, market_checked, sentiment_checked,
+                                  news_checked, fundamentals_checked, use_real_llm):
+            """运行分析的核心逻辑"""
             try:
                 # 准备分析师列表
                 selected_analysts = []
@@ -3037,22 +3770,86 @@ def create_enhanced_interface():
                         return value.get("analysis", str(value))
                     return str(value) if value else default
 
+                def format_clean_result(key, title=""):
+                    """格式化干净的结果，移除技术字段"""
+                    value = results.get(key, {})
+                    if isinstance(value, dict):
+                        # 移除技术字段，只保留用户关心的内容
+                        if 'analysis' in value:
+                            return value['analysis']
+                        elif 'recommendation' in value:
+                            return value['recommendation']
+                        elif 'strategy' in value:
+                            return value['strategy']
+                        else:
+                            # 对于复杂的字典结构，格式化输出
+                            clean_content = []
+                            agent_names = {
+                                'aggressive_debator': '激进分析师',
+                                'conservative_debator': '保守分析师',
+                                'neutral_debator': '中性分析师',
+                                'risk_manager': '风险经理'
+                            }
+                            for agent_key, agent_data in value.items():
+                                if isinstance(agent_data, dict) and 'analysis' in agent_data:
+                                    agent_name = agent_names.get(agent_key, agent_key)
+                                    clean_content.append(f"**{agent_name}观点**:\n{agent_data['analysis']}")
+                            return "\n\n".join(clean_content) if clean_content else str(value)
+                    return str(value) if value else "暂无数据"
+
+                # 使用格式化函数处理结果，移除技术字段
+                comprehensive_report = format_clean_result("comprehensive_report")
+                market_analysis = format_clean_result("market_analysis")
+                sentiment_analysis = format_clean_result("sentiment_analysis")
+                news_analysis = format_clean_result("news_analysis")
+                fundamentals_analysis = format_clean_result("fundamentals_analysis")
+                bull_arguments = format_clean_result("bull_arguments")
+                bear_arguments = format_clean_result("bear_arguments")
+                investment_recommendation = format_clean_result("investment_recommendation")
+                trading_strategy = format_clean_result("trading_strategy")
+                risk_assessment = format_clean_result("risk_assessment")
+                final_decision = format_clean_result("final_decision")
+
                 # 组合风险评估和最终决策
-                risk_assessment = safe_get_result("risk_assessment")
-                final_decision = safe_get_result("final_decision")
                 combined_risk_decision = f"{risk_assessment}\n\n### 最终决策\n{final_decision}"
+
+                # 使用数据收集器的股票名称获取方法
+                stock_data = results.get("results", {}).get("data_collection", {})
+                raw_name = stock_data.get("name", "") if isinstance(stock_data, dict) else ""
+                stock_name = app.data_collector.get_stock_name(symbol, raw_name)
+
+                # 构建包含股票名称的综合报告
+                enhanced_comprehensive_report = f"## {symbol}（{stock_name}）综合分析报告\n\n{comprehensive_report}"
+
+                # 保存完整结果用于导出
+                app.last_analysis_result = {
+                    "symbol": symbol,
+                    "stock_name": stock_name,
+                    "analysis_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "comprehensive_report": enhanced_comprehensive_report,
+                    "market_analysis": market_analysis,
+                    "sentiment_analysis": sentiment_analysis,
+                    "news_analysis": news_analysis,
+                    "fundamentals_analysis": fundamentals_analysis,
+                    "bull_arguments": bull_arguments,
+                    "bear_arguments": bear_arguments,
+                    "investment_recommendation": investment_recommendation,
+                    "trading_strategy": trading_strategy,
+                    "risk_assessment": risk_assessment,
+                    "final_decision": final_decision
+                }
 
                 return (
                     "✅ 分析完成",
-                    safe_get_result("comprehensive_report"),
-                    safe_get_result("market_analysis"),
-                    safe_get_result("sentiment_analysis"),
-                    safe_get_result("news_analysis"),
-                    safe_get_result("fundamentals_analysis"),
-                    safe_get_result("bull_arguments"),
-                    safe_get_result("bear_arguments"),
-                    safe_get_result("investment_recommendation"),
-                    safe_get_result("trading_strategy"),
+                    comprehensive_report,
+                    market_analysis,
+                    sentiment_analysis,
+                    news_analysis,
+                    fundamentals_analysis,
+                    bull_arguments,
+                    bear_arguments,
+                    investment_recommendation,
+                    trading_strategy,
                     combined_risk_decision
                 )
 
@@ -3107,6 +3904,17 @@ def create_enhanced_interface():
             result = loop.run_until_complete(app.test_llm_connection("moonshot", api_key))
             return result.get("message", "测试失败")
 
+        def test_dashscope_connection(api_key):
+            """测试阿里百炼连接"""
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            result = loop.run_until_complete(app.test_llm_connection("阿里百炼", api_key))
+            return result.get("message", "测试失败")
+
         # 保存配置的函数
         def save_deepseek_config(api_key):
             """保存DeepSeek配置"""
@@ -3136,6 +3944,14 @@ def create_enhanced_interface():
             """保存Moonshot配置"""
             if api_key and api_key != "●●●●●●●●●●●●":
                 app.llm_config["moonshot"] = api_key
+                result = app.save_config()
+                return result.get("message", "保存失败")
+            return "请输入有效的API密钥"
+
+        def save_dashscope_config(api_key):
+            """保存阿里百炼配置"""
+            if api_key and api_key != "●●●●●●●●●●●●":
+                app.llm_config["阿里百炼"] = api_key
                 result = app.save_config()
                 return result.get("message", "保存失败")
             return "请输入有效的API密钥"
@@ -3417,12 +4233,140 @@ def create_enhanced_interface():
             """更新系统状态"""
             return app.get_system_status()
 
+        def generate_export_report(format_type):
+            """生成导出报告并自动保存到本地目录"""
+            try:
+                report_content = app.export_analysis_report(format_type)
+
+                if report_content.startswith("❌"):
+                    return report_content, "", None
+
+                # 创建报告目录
+                report_dir = Path("./reports")
+                report_dir.mkdir(exist_ok=True)
+
+                # 生成文件名
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                symbol = app.last_analysis_result.get('symbol', 'UNKNOWN') if app.last_analysis_result else 'UNKNOWN'
+
+                # 使用数据收集器获取正确的股票名称
+                if app.last_analysis_result:
+                    raw_stock_name = app.last_analysis_result.get('stock_name', '')
+                    stock_name = app.data_collector.get_stock_name(symbol, raw_stock_name)
+                else:
+                    stock_name = 'UNKNOWN'
+
+                # 清理文件名中的特殊字符
+                safe_stock_name = "".join(c for c in stock_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                safe_stock_name = safe_stock_name.replace(' ', '_')
+
+                if format_type == "markdown":
+                    filename = f"{symbol}_{safe_stock_name}_{timestamp}.md"
+                elif format_type == "text":
+                    filename = f"{symbol}_{safe_stock_name}_{timestamp}.txt"
+                elif format_type == "json":
+                    filename = f"{symbol}_{safe_stock_name}_{timestamp}.json"
+                else:
+                    filename = f"{symbol}_{safe_stock_name}_{timestamp}.txt"
+
+                # 保存到报告目录
+                file_path = report_dir / filename
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(report_content)
+
+                status_msg = f"✅ 报告已保存到: ./reports/{filename}"
+                preview = report_content[:2000] + "..." if len(report_content) > 2000 else report_content
+
+                return status_msg, preview, str(file_path)
+
+            except Exception as e:
+                return f"❌ 报告生成失败: {str(e)}", "", None
+
+        def export_report_wrapper(format_type):
+            """导出报告包装函数"""
+            status, preview, file_path = generate_export_report(format_type)
+            return status, preview
+
+        def refresh_analysis_history():
+            """刷新分析历史列表"""
+            try:
+                history = app.get_report_history()
+                choices = [(item["display_name"], item["file_path"]) for item in history]
+                return gr.Dropdown.update(choices=choices, value=None)
+            except Exception as e:
+                logger.error(f"刷新历史列表失败: {e}")
+                return gr.Dropdown.update(choices=[], value=None)
+
+        def get_report_info(file_path):
+            """获取报告信息"""
+            if not file_path:
+                return "", ""
+
+            try:
+                history = app.get_report_history()
+                report_item = next((item for item in history if item["file_path"] == file_path), None)
+
+                if report_item:
+                    info = f"""股票代码: {report_item['symbol']}
+股票名称: {report_item['stock_name']}
+生成时间: {report_item['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}
+文件格式: {report_item['format'].upper()}
+文件大小: {report_item['size']} 字节"""
+                    return info, ""
+                else:
+                    return "未找到报告信息", ""
+            except Exception as e:
+                return f"获取报告信息失败: {str(e)}", ""
+
+        def view_analysis_report(file_path):
+            """查看分析报告"""
+            if not file_path:
+                return "请先选择一个报告"
+
+            try:
+                content = app.load_analysis_report(file_path)
+                return content
+            except Exception as e:
+                return f"❌ 加载报告失败: {str(e)}"
+
+        def delete_analysis_report(file_path):
+            """删除分析报告"""
+            if not file_path:
+                return "请先选择一个报告", gr.Dropdown.update(), ""
+
+            try:
+                success = app.delete_analysis_report(file_path)
+                if success:
+                    # 刷新列表
+                    history = app.get_report_history()
+                    choices = [(item["display_name"], item["file_path"]) for item in history]
+                    return "✅ 报告已删除", gr.Dropdown.update(choices=choices, value=None), ""
+                else:
+                    return "❌ 删除失败", gr.Dropdown.update(), ""
+            except Exception as e:
+                return f"❌ 删除失败: {str(e)}", gr.Dropdown.update(), ""
+
+        def clear_all_history():
+            """清空所有历史"""
+            try:
+                history = app.get_report_history()
+                deleted_count = 0
+
+                for item in history:
+                    if app.delete_analysis_report(item["file_path"]):
+                        deleted_count += 1
+
+                return f"✅ 已删除 {deleted_count} 个报告", gr.Dropdown.update(choices=[], value=None), ""
+            except Exception as e:
+                return f"❌ 清空失败: {str(e)}", gr.Dropdown.update(), ""
+
         # 绑定事件
         analyze_btn.click(
             fn=run_enhanced_analysis,
             inputs=[
                 stock_input, analysis_depth, analyst_market, analyst_sentiment,
-                analyst_news, analyst_fundamentals, use_real_llm
+                analyst_news, analyst_fundamentals, use_real_llm,
+                max_data_retries, max_llm_retries, retry_delay
             ],
             outputs=[
                 status_display, comprehensive_report, market_analysis_output,
@@ -3430,6 +4374,51 @@ def create_enhanced_interface():
                 bull_arguments, bear_arguments, investment_recommendation,
                 trading_strategy_output, risk_assessment_output
             ]
+        )
+
+        # 中断按钮事件绑定
+        interrupt_btn.click(
+            fn=interrupt_analysis,
+            inputs=[],
+            outputs=[status_display]
+        )
+
+        # 导出报告事件绑定
+        export_report_btn.click(
+            fn=export_report_wrapper,
+            inputs=[export_format],
+            outputs=[export_status, export_preview]
+        )
+
+        # 分析历史事件绑定
+        refresh_history_btn.click(
+            fn=refresh_analysis_history,
+            inputs=[],
+            outputs=[history_list]
+        )
+
+        history_list.change(
+            fn=get_report_info,
+            inputs=[history_list],
+            outputs=[report_info, history_report_content]
+        )
+
+        view_report_btn.click(
+            fn=view_analysis_report,
+            inputs=[history_list],
+            outputs=[history_report_content]
+        )
+
+        delete_report_btn.click(
+            fn=delete_analysis_report,
+            inputs=[history_list],
+            outputs=[report_info, history_list, history_report_content]
+        )
+
+        clear_history_btn.click(
+            fn=clear_all_history,
+            inputs=[],
+            outputs=[report_info, history_list, history_report_content]
         )
 
         # 内置提供商测试和保存
@@ -3479,6 +4468,19 @@ def create_enhanced_interface():
             fn=save_moonshot_config,
             inputs=[moonshot_key],
             outputs=[moonshot_status]
+        )
+
+        # 阿里百炼事件绑定
+        dashscope_test_btn.click(
+            fn=test_dashscope_connection,
+            inputs=[dashscope_key],
+            outputs=[dashscope_status]
+        )
+
+        dashscope_save_btn.click(
+            fn=save_dashscope_config,
+            inputs=[dashscope_key],
+            outputs=[dashscope_status]
         )
 
         # 批量配置操作
