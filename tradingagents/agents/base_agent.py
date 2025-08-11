@@ -8,8 +8,15 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from ..config.default_config import get_config
-from ..agents.utils.memory import MemoryManager
+try:
+    from ..config.default_config import get_config
+except ImportError:
+    # 使用适配器配置
+    import sys
+    import os
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+    from core.config_adapter import get_config
+from .utils.memory import MemoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -165,9 +172,13 @@ class BaseAgent(ABC):
         ]
         
         try:
+            # 确保context包含agent_id
+            llm_context = context or {}
+            llm_context["agent_id"] = self.agent_id
+
             response = await self.llm_client.process_async(
-                messages, 
-                context or {}
+                messages,
+                llm_context
             )
             return response.get("content", "")
         except Exception as e:

@@ -113,10 +113,12 @@ class ResearchManager(BaseAgent):
         
         # 添加辩论结果
         for i, debate in enumerate(debate_results, 1):
+            bull_response = str(debate.get('bull_response', 'N/A'))
+            bear_response = str(debate.get('bear_response', 'N/A'))
             prompt += f"""
 第{i}轮辩论:
-- 多头观点: {debate.get('bull_response', 'N/A')[:200]}...
-- 空头观点: {debate.get('bear_response', 'N/A')[:200]}...
+- 多头观点: {bull_response[:200]}...
+- 空头观点: {bear_response[:200]}...
 """
         
         prompt += """

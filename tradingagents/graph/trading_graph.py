@@ -22,7 +22,14 @@ from ..agents.risk_mgmt.neutral_debator import NeutralDebator
 from ..agents.managers.risk_manager import RiskManager
 from ..agents.utils.memory import MemoryManager
 from ..dataflows.interface import DataInterface
-from ..config.default_config import WORKFLOW_CONFIG
+try:
+    from ..config.default_config import WORKFLOW_CONFIG
+except ImportError:
+    # 使用适配器配置
+    import sys
+    import os
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+    from core.config_adapter import WORKFLOW_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +42,10 @@ class AnalysisDepth(Enum):
 class TradingGraph:
     """交易工作流图 - 核心协调器"""
     
-    def __init__(self, llm_client=None):
+    def __init__(self, llm_client=None, data_interface=None):
         self.llm_client = llm_client
         self.memory_manager = MemoryManager()
-        self.data_interface = DataInterface()
+        self.data_interface = data_interface or DataInterface()
         self.workflow_config = WORKFLOW_CONFIG
         
         # 初始化所有智能体
@@ -152,7 +159,7 @@ class TradingGraph:
         """收集市场数据"""
         try:
             # 获取综合数据
-            comprehensive_data = await self.data_interface.get_comprehensive_data(symbol)
+            comprehensive_data = await self.data_interface.get_stock_data(symbol)
             
             # 获取市场概览
             market_overview = await self.data_interface.get_market_overview()

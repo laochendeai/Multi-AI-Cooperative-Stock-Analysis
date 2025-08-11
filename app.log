@@ -1,8 +1,0 @@
-2025-08-02 20:00:25,750 - __main__ - INFO - 正在启动TradingAgents应用...
-2025-08-02 20:00:27,116 - httpx - INFO - HTTP Request: GET https://api.gradio.app/pkg-version "HTTP/1.1 200 OK"
-2025-08-02 20:00:27,975 - httpx - INFO - HTTP Request: GET http://localhost:7860/gradio_api/startup-events "HTTP/1.1 200 OK"
-2025-08-02 20:00:30,064 - httpx - INFO - HTTP Request: HEAD http://localhost:7860/ "HTTP/1.1 200 OK"
-2025-08-02 20:03:57,950 - __main__ - INFO - 正在启动TradingAgents应用...
-2025-08-02 20:03:59,630 - httpx - INFO - HTTP Request: GET https://api.gradio.app/pkg-version "HTTP/1.1 200 OK"
-2025-08-02 20:04:00,190 - httpx - INFO - HTTP Request: GET http://localhost:7860/gradio_api/startup-events "HTTP/1.1 200 OK"
-2025-08-02 20:04:02,253 - httpx - INFO - HTTP Request: HEAD http://localhost:7860/ "HTTP/1.1 200 OK"

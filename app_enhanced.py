@@ -15,6 +15,11 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 import base64
+import hashlib
+import hmac
+
+# 导入二维码安全模块
+from core.qrcode_security import display_donation_info, verify_qrcode
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -552,7 +557,7 @@ class EnhancedTradingAgentsApp:
 
         # 智能体模型配置
         self.agent_model_config = {}
-        self.load_agent_model_config()
+        self.agent_model_config = self.load_agent_model_config()
 
         # 通信日志
         self.communication_logs = []
@@ -950,6 +955,50 @@ class EnhancedTradingAgentsApp:
 
         return models
 
+    def get_provider_models(self, provider: str) -> List[str]:
+        """获取指定提供商的可用模型列表"""
+        try:
+            from core.enhanced_llm_manager import EnhancedLLMManager
+            llm_manager = EnhancedLLMManager()
+            models = llm_manager.get_provider_models(provider)
+            return [model["id"] for model in models]
+        except ImportError:
+            # 回退到原有逻辑
+            available_models = self.get_available_models()
+            return available_models.get(provider, [])
+
+    def validate_model_compatibility(self, agent_id: str, provider: str, model: str) -> Dict[str, Any]:
+        """验证模型与智能体的兼容性"""
+        try:
+            from core.agent_model_manager import AgentModelManager
+            from core.enhanced_llm_manager import EnhancedLLMManager
+
+            agent_manager = AgentModelManager()
+            llm_manager = EnhancedLLMManager()
+
+            # 获取所有可用模型的详细信息
+            available_models = {}
+            all_providers = llm_manager.get_all_providers()
+
+            for provider_id in list(all_providers["built_in"].keys()) + list(all_providers["custom"].keys()):
+                available_models[provider_id] = llm_manager.get_provider_models(provider_id)
+
+            return agent_manager.validate_model_compatibility(agent_id, provider, model, available_models)
+
+        except ImportError:
+            # 回退到简单验证
+            if provider not in self.llm_config:
+                return {"compatible": False, "reason": f"提供商 {provider} 未配置"}
+
+            available_models = self.get_available_models()
+            if provider not in available_models:
+                return {"compatible": False, "reason": f"提供商 {provider} 不可用"}
+
+            if model not in available_models[provider]:
+                return {"compatible": False, "reason": f"模型 {model} 在提供商 {provider} 中不存在"}
+
+            return {"compatible": True, "score": 0.8, "recommendation": "基本兼容"}
+
     def get_common_models_for_provider(self, provider_name: str) -> List[str]:
         """根据提供商名称推荐常见模型"""
         common_models = {
@@ -1007,14 +1056,20 @@ class EnhancedTradingAgentsApp:
             config_file = self.config_dir / "agent_model_config.json"
             if config_file.exists():
                 with open(config_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    loaded_config = json.load(f)
+                    logger.info(f"成功加载智能体模型配置: {len(loaded_config)}个智能体")
+                    # 更新实例变量
+                    self.agent_model_config = loaded_config
+                    return loaded_config
         except Exception as e:
             logger.error(f"加载智能体模型配置失败: {e}")
 
         # 返回默认配置
         default_model = "deepseek:deepseek-chat"
         agents = self.get_agent_list()
-        return {agent["id"]: default_model for agent in agents}
+        default_config = {agent["id"]: default_model for agent in agents}
+        self.agent_model_config = default_config
+        return default_config
 
     def save_agent_model_config(self) -> Dict[str, Any]:
         """保存智能体模型配置"""
@@ -1055,16 +1110,23 @@ class EnhancedTradingAgentsApp:
                          prompt: str, response: str, status: str = "success"):
         """记录LLM通信日志"""
         try:
+            # 生成唯一的日志序列号
+            log_id = len(self.communication_logs) + 1
+
             log_entry = {
+                "id": log_id,
                 "timestamp": datetime.now().isoformat(),
                 "agent_id": agent_id,
                 "provider": provider,
                 "model": model,
-                "prompt": prompt[:500] + "..." if len(prompt) > 500 else prompt,
-                "response": response[:1000] + "..." if len(response) > 1000 else response,
+                "prompt": prompt,  # 保存完整提示
+                "response": response,  # 保存完整响应
+                "prompt_preview": prompt[:100] + "..." if len(prompt) > 100 else prompt,
+                "response_preview": response[:100] + "..." if len(response) > 100 else response,
                 "status": status,
                 "prompt_length": len(prompt),
-                "response_length": len(response)
+                "response_length": len(response),
+                "duration": "N/A"  # 可以后续添加响应时间
             }
 
             self.communication_logs.append(log_entry)
@@ -1072,6 +1134,9 @@ class EnhancedTradingAgentsApp:
             # 保持日志数量在限制内
             if len(self.communication_logs) > self.max_logs:
                 self.communication_logs = self.communication_logs[-self.max_logs:]
+                # 重新分配ID
+                for i, log in enumerate(self.communication_logs):
+                    log["id"] = i + 1
 
             logger.info(f"记录通信日志: {agent_id} -> {provider}:{model}")
 
@@ -1242,13 +1307,27 @@ class EnhancedTradingAgentsApp:
                 "timestamp": datetime.now().isoformat()
             }
 
+    def _get_debate_rounds(self, depth: str) -> int:
+        """根据分析深度获取辩论轮数"""
+        depth_rounds = {
+            "快速分析": 1,  # 1轮辩论
+            "标准分析": 2,  # 2轮辩论
+            "深度分析": 3,  # 3轮辩论
+            "全面分析": 4   # 4轮辩论
+        }
+        return depth_rounds.get(depth, 2)
+
     async def _real_agent_analysis(self, symbol: str, depth: str, analysts: List[str]) -> Dict[str, Any]:
-        """真实的智能体分析流程（带中断机制）"""
+        """真实的智能体分析流程（带中断机制和多轮辩论）"""
         try:
             start_time = datetime.now()
             self.analysis_state["is_running"] = True
             self.reset_analysis_state()
             self.analysis_state["is_running"] = True
+
+            # 获取辩论轮数
+            debate_rounds = self._get_debate_rounds(depth)
+            logger.info(f"📊 开始{depth}，将进行{debate_rounds}轮辩论")
 
             # 1. 数据收集阶段
             logger.info("📊 阶段1: 数据收集")
@@ -1274,9 +1353,9 @@ class EnhancedTradingAgentsApp:
             if self.check_should_interrupt():
                 return {"status": "interrupted", "message": "分析被用户中断"}
 
-            # 3. 研究团队辩论
-            logger.info("🔬 阶段3: 研究团队辩论")
-            research_results = await self._run_research_team(symbol, analyst_results)
+            # 3. 多轮研究团队辩论
+            logger.info(f"🔬 阶段3: 研究团队多轮辩论（{debate_rounds}轮）")
+            research_results = await self._run_multi_round_research_team(symbol, analyst_results, debate_rounds)
 
             if self.check_should_interrupt():
                 return {"status": "interrupted", "message": "分析被用户中断"}
@@ -2022,25 +2101,277 @@ class EnhancedTradingAgentsApp:
             logger.error(f"基本面分析师调用失败: {e}")
             return {"error": str(e), "agent_id": "fundamentals_analyst"}
 
-    async def _run_research_team(self, symbol: str, analyst_results: Dict[str, Any]) -> Dict[str, Any]:
-        """运行研究团队"""
+    async def _run_multi_round_research_team(self, symbol: str, analyst_results: Dict[str, Any], rounds: int) -> Dict[str, Any]:
+        """运行多轮研究团队辩论"""
         try:
             results = {}
+            debate_history = []
 
-            # 1. 多头研究员
-            results["bull_researcher"] = await self._call_bull_researcher(symbol, analyst_results)
+            logger.info(f"🔬 开始{rounds}轮研究团队辩论")
 
-            # 2. 空头研究员
-            results["bear_researcher"] = await self._call_bear_researcher(symbol, analyst_results)
+            # 初始观点
+            bull_view = ""
+            bear_view = ""
 
-            # 3. 研究经理
-            results["research_manager"] = await self._call_research_manager(symbol, results)
+            for round_num in range(1, rounds + 1):
+                logger.info(f"🥊 第{round_num}轮辩论")
+
+                # 多头研究员
+                bull_result = await self._call_bull_researcher_with_context(
+                    symbol, analyst_results, bear_view, round_num, rounds
+                )
+                bull_view = bull_result.get("analysis", "")
+
+                # 空头研究员
+                bear_result = await self._call_bear_researcher_with_context(
+                    symbol, analyst_results, bull_view, round_num, rounds
+                )
+                bear_view = bear_result.get("analysis", "")
+
+                # 记录本轮辩论
+                debate_round = {
+                    "round": round_num,
+                    "bull_view": bull_view,
+                    "bear_view": bear_view,
+                    "bull_strength": len(bull_view.split("。")) if bull_view else 0,
+                    "bear_strength": len(bear_view.split("。")) if bear_view else 0
+                }
+                debate_history.append(debate_round)
+
+                logger.info(f"第{round_num}轮完成 - 多头论据: {debate_round['bull_strength']}条, 空头论据: {debate_round['bear_strength']}条")
+
+            # 最终结果
+            results["bull_researcher"] = {"analysis": bull_view, "agent_id": "bull_researcher"}
+            results["bear_researcher"] = {"analysis": bear_view, "agent_id": "bear_researcher"}
+            results["debate_history"] = debate_history
+            results["total_rounds"] = rounds
+
+            # 研究经理综合评估
+            results["research_manager"] = await self._call_research_manager_with_debate_history(
+                symbol, results, debate_history
+            )
+
+            logger.info(f"✅ {rounds}轮辩论完成，共产生{sum(r['bull_strength'] + r['bear_strength'] for r in debate_history)}条论据")
 
             return results
 
         except Exception as e:
-            logger.error(f"研究团队运行失败: {e}")
+            logger.error(f"多轮研究团队运行失败: {e}")
             return {"error": str(e)}
+
+    async def _run_research_team(self, symbol: str, analyst_results: Dict[str, Any]) -> Dict[str, Any]:
+        """运行研究团队（兼容性保留）"""
+        return await self._run_multi_round_research_team(symbol, analyst_results, 2)
+
+    async def _call_bull_researcher_with_context(self, symbol: str, analyst_results: Dict[str, Any],
+                                                bear_view: str, round_num: int, total_rounds: int) -> Dict[str, Any]:
+        """调用多头研究员（带上下文辩论）"""
+        try:
+            model_config = self.agent_model_config.get("bull_researcher", "deepseek:deepseek-chat")
+            provider, model = model_config.split(":", 1)
+
+            # 汇总分析师观点
+            market_view = analyst_results.get("market_analyst", {}).get("analysis", "")
+            sentiment_view = analyst_results.get("sentiment_analyst", {}).get("analysis", "")
+            news_view = analyst_results.get("news_analyst", {}).get("analysis", "")
+            fundamentals_view = analyst_results.get("fundamentals_analyst", {}).get("analysis", "")
+
+            # 使用数据收集器的股票名称获取方法
+            stock_name = self.data_collector.get_stock_name(symbol)
+
+            # 根据轮次调整提示词
+            if round_num == 1:
+                context_prompt = "这是第一轮辩论，请提出你的初始多头观点。"
+                min_points = 3
+            else:
+                context_prompt = f"""
+这是第{round_num}轮辩论（共{total_rounds}轮）。
+
+空头研究员在前一轮的观点:
+{bear_view[:400]}
+
+请针对空头观点进行有力反驳，并提供更多支撑看涨的论据。
+"""
+                min_points = round_num + 2
+
+            prompt = f"""
+你是专业的多头研究员。基于分析师团队的报告，请为股票{symbol}（{stock_name}）提供看涨论据。
+
+**重要提醒**: 请在分析中始终使用正确的股票代码{symbol}和股票名称{stock_name}。
+
+{context_prompt}
+
+分析师观点摘要:
+- 技术分析: {market_view[:150]}...
+- 情感分析: {sentiment_view[:150]}...
+- 新闻分析: {news_view[:150]}...
+- 基本面分析: {fundamentals_view[:150]}...
+
+请基于以上分析提供:
+1. 主要看涨理由（至少{min_points}条具体论据）
+2. 上涨催化剂分析
+3. 目标价位预期
+4. 投资机会评估
+{f"5. 对空头观点的针对性反驳" if round_num > 1 else ""}
+
+要求：论据要比前一轮更加充分详实，每条理由都要有具体支撑。务必在回答中使用正确的股票代码{symbol}和名称{stock_name}。
+"""
+
+            response = await self._call_llm(provider, model, prompt, "bull_researcher")
+
+            return {
+                "agent_id": "bull_researcher",
+                "analysis": response,
+                "round": round_num,
+                "bullish_score": self._extract_bullish_score(response),
+                "confidence": self._extract_confidence(response),
+                "timestamp": datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"多头研究员调用失败: {e}")
+            return {"error": str(e), "agent_id": "bull_researcher"}
+
+    async def _call_bear_researcher_with_context(self, symbol: str, analyst_results: Dict[str, Any],
+                                                bull_view: str, round_num: int, total_rounds: int) -> Dict[str, Any]:
+        """调用空头研究员（带上下文辩论）"""
+        try:
+            model_config = self.agent_model_config.get("bear_researcher", "deepseek:deepseek-chat")
+            provider, model = model_config.split(":", 1)
+
+            # 汇总分析师观点
+            market_view = analyst_results.get("market_analyst", {}).get("analysis", "")
+            sentiment_view = analyst_results.get("sentiment_analyst", {}).get("analysis", "")
+            news_view = analyst_results.get("news_analyst", {}).get("analysis", "")
+            fundamentals_view = analyst_results.get("fundamentals_analyst", {}).get("analysis", "")
+
+            # 使用数据收集器的股票名称获取方法
+            stock_name = self.data_collector.get_stock_name(symbol)
+
+            # 根据轮次调整提示词
+            if round_num == 1:
+                context_prompt = "这是第一轮辩论，请提出你的初始空头观点。"
+                min_points = 3
+            else:
+                context_prompt = f"""
+这是第{round_num}轮辩论（共{total_rounds}轮）。
+
+多头研究员在本轮的观点:
+{bull_view[:400]}
+
+请针对多头观点进行有力反驳，并提供更多支撑看跌的论据。
+"""
+                min_points = round_num + 2
+
+            prompt = f"""
+你是专业的空头研究员。基于分析师团队的报告，请为股票{symbol}（{stock_name}）提供看跌论据。
+
+**重要提醒**: 请在分析中始终使用正确的股票代码{symbol}和股票名称{stock_name}。
+
+{context_prompt}
+
+分析师观点摘要:
+- 技术分析: {market_view[:150]}...
+- 情感分析: {sentiment_view[:150]}...
+- 新闻分析: {news_view[:150]}...
+- 基本面分析: {fundamentals_view[:150]}...
+
+请基于以上分析提供:
+1. 主要看跌理由（至少{min_points}条具体论据）
+2. 下跌风险因素
+3. 目标价位预期
+4. 风险警示评估
+{f"5. 对多头观点的针对性反驳" if round_num > 1 else ""}
+
+要求：论据要比前一轮更加充分详实，每条理由都要有具体支撑。务必在回答中使用正确的股票代码{symbol}和名称{stock_name}。
+"""
+
+            response = await self._call_llm(provider, model, prompt, "bear_researcher")
+
+            return {
+                "agent_id": "bear_researcher",
+                "analysis": response,
+                "round": round_num,
+                "bearish_score": self._extract_bearish_score(response),
+                "confidence": self._extract_confidence(response),
+                "timestamp": datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"空头研究员调用失败: {e}")
+            return {"error": str(e), "agent_id": "bear_researcher"}
+
+    async def _call_research_manager_with_debate_history(self, symbol: str, results: Dict[str, Any],
+                                                        debate_history: List[Dict]) -> Dict[str, Any]:
+        """调用研究经理（带辩论历史）"""
+        try:
+            model_config = self.agent_model_config.get("research_manager", "deepseek:deepseek-chat")
+            provider, model = model_config.split(":", 1)
+
+            # 使用数据收集器的股票名称获取方法
+            stock_name = self.data_collector.get_stock_name(symbol)
+
+            # 构建辩论历史摘要
+            debate_summary = ""
+            total_bull_points = 0
+            total_bear_points = 0
+
+            for i, round_data in enumerate(debate_history, 1):
+                bull_strength = round_data['bull_strength']
+                bear_strength = round_data['bear_strength']
+                total_bull_points += bull_strength
+                total_bear_points += bear_strength
+
+                debate_summary += f"""
+第{i}轮辩论:
+- 多头论据: {bull_strength}条
+- 空头论据: {bear_strength}条
+"""
+
+            final_bull_view = results.get("bull_researcher", {}).get("analysis", "")
+            final_bear_view = results.get("bear_researcher", {}).get("analysis", "")
+
+            prompt = f"""
+你是研究经理。基于{len(debate_history)}轮多空辩论，请对股票{symbol}（{stock_name}）做出综合投资建议。
+
+**重要提醒**: 请在分析中始终使用正确的股票代码{symbol}和股票名称{stock_name}。
+
+辩论历史摘要:
+{debate_summary}
+
+总计论据统计:
+- 多头总论据: {total_bull_points}条
+- 空头总论据: {total_bear_points}条
+
+最终观点:
+多头观点: {final_bull_view[:200]}...
+空头观点: {final_bear_view[:200]}...
+
+请基于多轮辩论的充分论证，提供:
+1. 综合投资建议（买入/持有/卖出）
+2. 辩论质量评估
+3. 关键争议点分析
+4. 最终决策依据
+5. 风险收益评估
+
+要求客观公正，基于辩论的充分性和论据强度做出判断。
+"""
+
+            response = await self._call_llm(provider, model, prompt, "research_manager")
+
+            return {
+                "agent_id": "research_manager",
+                "analysis": response,
+                "debate_rounds": len(debate_history),
+                "total_arguments": total_bull_points + total_bear_points,
+                "bull_arguments": total_bull_points,
+                "bear_arguments": total_bear_points,
+                "timestamp": datetime.now().isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"研究经理调用失败: {e}")
+            return {"error": str(e), "agent_id": "research_manager"}
 
     async def _call_bull_researcher(self, symbol: str, analyst_results: Dict[str, Any]) -> Dict[str, Any]:
         """调用多头研究员"""
@@ -2970,104 +3301,451 @@ def create_enhanced_interface():
 
     with gr.Blocks(
         title="TradingAgents - 增强版多智能体股票分析系统",
-        theme=gr.themes.Soft()
+        theme=gr.themes.Soft(),
+        css="""
+        /* 全局样式优化 */
+        .gradio-container {
+            max-width: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+
+        /* 优化的导航栏样式 - 减小高度 */
+        .main-header {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            z-index: 9999 !important;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            padding: 8px 20px !important;  /* 减小内边距 */
+            border-radius: 0 0 12px 12px !important;
+            box-shadow: 0 2px 20px rgba(0,0,0,0.15) !important;
+            backdrop-filter: blur(15px) !important;
+            margin: 0 !important;
+            min-height: 60px !important;  /* 设置最小高度 */
+        }
+
+        /* 标题区域样式优化 */
+        .title-section {
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: center !important;
+            padding: 5px 0 !important;  /* 减小内边距 */
+        }
+
+        .title-section h1 {
+            font-size: 1.4em !important;  /* 减小字体 */
+            margin: 0 !important;
+            line-height: 1.2 !important;
+            font-weight: 600 !important;
+        }
+
+        .title-section p {
+            font-size: 0.85em !important;  /* 减小字体 */
+            margin: 2px 0 0 0 !important;
+            opacity: 0.9 !important;
+            line-height: 1.1 !important;
+        }
+
+        /* 赞助区域样式优化 */
+        .sponsor-section {
+            display: flex !important;
+            flex-direction: row !important;  /* 改为水平布局 */
+            align-items: center !important;
+            justify-content: center !important;
+            background: rgba(255,255,255,0.12) !important;
+            border-radius: 8px !important;
+            padding: 6px 10px !important;  /* 减小内边距 */
+            backdrop-filter: blur(10px) !important;
+            gap: 8px !important;
+        }
+
+        .sponsor-text {
+            text-align: center !important;
+            margin-right: 8px !important;
+        }
+
+        .sponsor-text h3 {
+            font-size: 0.9em !important;  /* 减小字体 */
+            margin: 0 !important;
+            color: #FFD700 !important;
+        }
+
+        .sponsor-text p {
+            font-size: 0.75em !important;  /* 减小字体 */
+            margin: 2px 0 0 0 !important;
+            opacity: 0.9 !important;
+        }
+
+        /* 二维码样式优化 */
+        .sponsor-qr {
+            border-radius: 6px !important;
+            border: 1px solid rgba(255,255,255,0.4) !important;
+            max-width: 50px !important;  /* 减小尺寸 */
+            max-height: 50px !important;  /* 减小尺寸 */
+            min-width: 50px !important;
+            min-height: 50px !important;
+        }
+
+        /* 内容包装器优化 */
+        .content-wrapper {
+            margin-top: 80px !important;  /* 大幅减小顶部间距 */
+            padding: 15px !important;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%) !important;
+            min-height: calc(100vh - 80px) !important;
+        }
+
+        /* 卡片样式 */
+        .card {
+            background: white !important;
+            border-radius: 12px !important;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08) !important;
+            border: 1px solid rgba(0,0,0,0.05) !important;
+            margin-bottom: 20px !important;
+            overflow: hidden !important;
+            padding: 20px !important;
+        }
+
+        /* 标签页样式优化 */
+        .tab-nav {
+            background: white !important;
+            border-radius: 12px 12px 0 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }
+
+        /* 输入字段样式 */
+        .input-field input {
+            border-radius: 8px !important;
+            border: 2px solid #e9ecef !important;
+            padding: 12px !important;
+            font-size: 14px !important;
+            transition: all 0.3s ease !important;
+        }
+
+        .input-field input:focus {
+            border-color: #667eea !important;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1) !important;
+        }
+
+        /* 下拉框样式 */
+        .dropdown-field select {
+            border-radius: 8px !important;
+            border: 2px solid #e9ecef !important;
+            padding: 12px !important;
+            font-size: 14px !important;
+        }
+
+        /* 按钮样式优化 */
+        .analyze-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+            border: none !important;
+            border-radius: 10px !important;
+            padding: 15px 30px !important;
+            font-size: 16px !important;
+            font-weight: 600 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 1px !important;
+            transition: all 0.3s ease !important;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3) !important;
+        }
+
+        .analyze-button:hover {
+            transform: translateY(-2px) !important;
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4) !important;
+        }
+
+        /* 状态显示样式 */
+        .status-display input {
+            background: #f8f9fa !important;
+            border: 2px solid #e9ecef !important;
+            border-radius: 8px !important;
+            color: #495057 !important;
+            font-weight: 500 !important;
+        }
+
+        /* 结果显示样式 */
+        .result-display {
+            min-height: 400px !important;
+            border-radius: 8px !important;
+        }
+
+        .result-tab {
+            padding: 0 !important;
+        }
+
+        /* 组件分组样式 */
+        .gradio-group {
+            background: #f8f9fa !important;
+            border: 1px solid #e9ecef !important;
+            border-radius: 8px !important;
+            padding: 15px !important;
+            margin-bottom: 15px !important;
+        }
+
+        /* 响应式设计优化 */
+        @media (max-width: 768px) {
+            .main-header {
+                flex-direction: column !important;
+                gap: 8px !important;
+                text-align: center !important;
+                padding: 8px 15px !important;
+                min-height: 90px !important;
+            }
+
+            .sponsor-section {
+                flex-direction: column !important;
+                gap: 4px !important;
+            }
+
+            .content-wrapper {
+                margin-top: 100px !important;
+                padding: 10px !important;
+            }
+
+            .title-section h1 {
+                font-size: 1.2em !important;
+            }
+
+            .title-section p {
+                font-size: 0.8em !important;
+            }
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .title-section h1 {
+            color: white;
+            margin: 0;
+            font-size: 1.8em;
+            font-weight: bold;
+        }
+
+        .title-section p {
+            color: rgba(255,255,255,0.9);
+            margin: 5px 0 0 0;
+            font-size: 1em;
+        }
+
+        .sponsor-section {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            background: rgba(255,255,255,0.1);
+            padding: 10px 15px;
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+        }
+
+        .sponsor-qr {
+            width: 80px;
+            height: 80px;
+            border-radius: 8px;
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+
+        .sponsor-text {
+            color: white;
+            text-align: left;
+        }
+
+        .sponsor-text h3 {
+            margin: 0 0 5px 0;
+            font-size: 1.1em;
+            color: #FFD700;
+        }
+
+        .sponsor-text p {
+            margin: 0;
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .header-content {
+                flex-direction: column;
+                gap: 15px;
+                text-align: center;
+            }
+
+            .sponsor-section {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .sponsor-qr {
+                width: 60px;
+                height: 60px;
+            }
+        }
+        """
     ) as interface:
 
-        # 主标题
-        gr.Markdown("""
-        # 🤖 TradingAgents - 增强版多智能体协作股票分析系统
+        # 优化的紧凑导航栏
+        with gr.Row(elem_classes=["main-header"]):
+            with gr.Column(scale=4, elem_classes=["title-section"]):
+                gr.HTML("""
+                <div style="color: white;">
+                    <h1>🤖 TradingAgents - 增强版多智能体协作股票分析系统</h1>
+                    <p><strong>基于15个专业化智能体的金融交易分析框架</strong> | 支持LLM配置和ChromaDB</p>
+                </div>
+                """)
 
-        **基于15个专业化智能体的金融交易分析框架** | 支持LLM配置和ChromaDB
-
-        ---
-        """)
-
-        with gr.Tabs():
-            # 主分析界面
-            with gr.TabItem("📊 股票分析"):
+            with gr.Column(scale=1, elem_classes=["sponsor-section"]):
                 with gr.Row():
-                    # 左侧控制台
+                    with gr.Column(scale=2, elem_classes=["sponsor-text"]):
+                        gr.HTML("""
+                        <div style="color: white;">
+                            <h3>💖 赞助支持</h3>
+                            <p>您的支持是我持续开发的动力</p>
+                        </div>
+                        """)
                     with gr.Column(scale=1):
-                        gr.Markdown("## 📊 分析控制台")
-
-                        # 股票输入
-                        stock_input = gr.Textbox(
-                            label="股票代码",
-                            placeholder="输入股票代码，如：000001、600036、600519",
-                            value="600519"
+                        # 使用新的二维码
+                        gr.Image(
+                            value="assets/donation_code.png",
+                            show_label=False,
+                            show_download_button=False,
+                            show_share_button=False,
+                            interactive=False,
+                            width=50,
+                            height=50,
+                            elem_classes=["sponsor-qr"]
                         )
 
-                        # 分析深度
-                        analysis_depth = gr.Dropdown(
-                            label="研究深度",
-                            choices=["浅层分析", "中等分析", "深度分析"],
-                            value="中等分析"
-                        )
+        # 优化的内容包装器
+        with gr.Column(elem_classes=["content-wrapper"]):
+            with gr.Tabs(elem_classes=["tab-nav"]):
+                # 主分析界面 - 重新设计布局
+                with gr.TabItem("📊 智能分析", elem_classes=["card"]):
+                    with gr.Row():
+                        # 左侧控制面板 - 更紧凑的设计
+                        with gr.Column(scale=1, elem_classes=["card"]):
+                            gr.HTML("""
+                            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                        color: white; padding: 15px; margin: -20px -20px 20px -20px;
+                                        border-radius: 12px 12px 0 0;">
+                                <h3 style="margin: 0; font-size: 1.2em;">🎯 分析控制中心</h3>
+                                <p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 0.9em;">配置您的专属分析参数</p>
+                            </div>
+                            """)
 
-                        # 分析师选择
-                        gr.Markdown("### 👥 分析师团队")
-                        analyst_market = gr.Checkbox(label="📈 市场分析师", value=True)
-                        analyst_sentiment = gr.Checkbox(label="💭 情感分析师", value=True)
-                        analyst_news = gr.Checkbox(label="📰 新闻分析师", value=True)
-                        analyst_fundamentals = gr.Checkbox(label="📊 基本面分析师", value=True)
-
-                        # LLM选择
-                        gr.Markdown("### 🤖 LLM配置")
-                        use_real_llm = gr.Checkbox(
-                            label="使用真实LLM (需要API密钥)",
-                            value=False,
-                            info="未选择时使用模拟响应"
-                        )
-
-                        # 执行按钮
-                        with gr.Row():
-                            analyze_btn = gr.Button("🚀 开始全面分析", variant="primary", size="lg")
-                            interrupt_btn = gr.Button("⏹️ 中断分析", variant="stop", size="lg", visible=False)
-                            export_btn = gr.Button("📄 导出报告", variant="secondary", size="lg")
-
-                        # 状态显示
-                        status_display = gr.Textbox(
-                            label="分析状态",
-                            value="🟢 系统就绪",
-                            interactive=False
-                        )
-
-                        # 重试配置
-                        with gr.Accordion("🔧 重试配置", open=False):
-                            with gr.Row():
-                                max_data_retries = gr.Slider(
-                                    minimum=1, maximum=5, value=3, step=1,
-                                    label="数据获取重试次数",
-                                    info="获取股票数据失败时的最大重试次数"
-                                )
-                                max_llm_retries = gr.Slider(
-                                    minimum=1, maximum=3, value=2, step=1,
-                                    label="LLM调用重试次数",
-                                    info="LLM调用失败时的最大重试次数"
+                            # 股票输入区域
+                            with gr.Group():
+                                gr.HTML("<h4 style='margin: 0 0 10px 0; color: #333;'>📈 股票选择</h4>")
+                                stock_input = gr.Textbox(
+                                    label="股票代码",
+                                    placeholder="输入股票代码，如：000001、600036、600519",
+                                    value="600519",
+                                    elem_classes=["input-field"]
                                 )
 
-                            retry_delay = gr.Slider(
-                                minimum=0.5, maximum=5.0, value=1.0, step=0.5,
-                                label="重试延迟（秒）",
-                                info="重试之间的等待时间"
-                            )
+                            # 分析配置区域
+                            with gr.Group():
+                                gr.HTML("<h4 style='margin: 15px 0 10px 0; color: #333;'>⚙️ 分析配置</h4>")
+                                analysis_depth = gr.Dropdown(
+                                    label="研究深度",
+                                    choices=["快速分析", "标准分析", "深度分析", "全面分析"],
+                                    value="标准分析",
+                                    elem_classes=["dropdown-field"]
+                                )
 
-                        # 系统状态
-                        gr.Markdown("### 📡 系统状态")
-                        system_status_display = gr.JSON(
-                            label="系统状态",
-                            value=app.get_system_status()
-                        )
+                            # 智能体团队选择
+                            with gr.Group():
+                                gr.HTML("<h4 style='margin: 15px 0 10px 0; color: #333;'>👥 AI分析师团队</h4>")
+                                with gr.Row():
+                                    with gr.Column():
+                                        analyst_market = gr.Checkbox(label="📈 市场分析师", value=True)
+                                        analyst_sentiment = gr.Checkbox(label="💭 情感分析师", value=True)
+                                    with gr.Column():
+                                        analyst_news = gr.Checkbox(label="📰 新闻分析师", value=True)
+                                        analyst_fundamentals = gr.Checkbox(label="📊 基本面分析师", value=True)
 
-                    # 右侧结果展示
-                    with gr.Column(scale=2):
-                        gr.Markdown("## 📈 分析结果")
+                            # LLM配置
+                            with gr.Group():
+                                gr.HTML("<h4 style='margin: 15px 0 10px 0; color: #333;'>🤖 AI引擎</h4>")
+                                use_real_llm = gr.Checkbox(
+                                    label="启用真实LLM (需要API密钥)",
+                                    value=False,
+                                    info="未启用时使用演示模式"
+                                )
 
-                        # 结果标签页
+                            # 分析按钮 - 移到左侧栏
+                            with gr.Group():
+                                gr.HTML("<div style='margin: 20px 0 10px 0;'></div>")
+                                analyze_btn = gr.Button(
+                                    "🚀 开始全面分析",
+                                    variant="primary",
+                                    size="lg",
+                                    elem_classes=["analyze-button"]
+                                )
+
+                                # 状态显示
+                                status_display = gr.Textbox(
+                                    label="分析状态",
+                                    value="🎯 准备就绪，等待开始分析...",
+                                    interactive=False,
+                                    elem_classes=["status-display"]
+                                )
+
+                            # 高级配置 - 折叠面板
+                            with gr.Accordion("⚙️ 高级配置", open=False):
+                                with gr.Row():
+                                    max_data_retries = gr.Slider(
+                                        minimum=1, maximum=5, value=3, step=1,
+                                        label="数据获取重试次数",
+                                        info="获取股票数据失败时的最大重试次数"
+                                    )
+                                    max_llm_retries = gr.Slider(
+                                        minimum=1, maximum=3, value=2, step=1,
+                                        label="LLM调用重试次数",
+                                        info="LLM调用失败时的最大重试次数"
+                                    )
+
+                                retry_delay = gr.Slider(
+                                    minimum=0.5, maximum=5.0, value=1.0, step=0.5,
+                                    label="重试延迟（秒）",
+                                    info="重试之间的等待时间"
+                                )
+
+                    # 右侧多功能区域 - 重新设计为标签切换
+                    with gr.Column(scale=2, elem_classes=["card"]):
+                        # 顶部标签切换区域
                         with gr.Tabs():
-                            # 综合报告
-                            with gr.TabItem("📋 综合报告"):
-                                comprehensive_report = gr.Markdown(value="等待分析结果...")
+                            # 分析结果标签
+                            with gr.TabItem("📊 分析结果", elem_classes=["main-tab"]):
+                                gr.HTML("""
+                                <div style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+                                            color: white; padding: 15px; margin: -20px -20px 20px -20px;
+                                            border-radius: 12px 12px 0 0;">
+                                    <h3 style="margin: 0; font-size: 1.2em;">📊 智能分析结果</h3>
+                                    <p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 0.9em;">AI多智能体协作分析报告</p>
+                                </div>
+                                """)
+
+                                # 分析结果子标签
+                                with gr.Tabs():
+                                    # 综合报告
+                                    with gr.TabItem("🎯 综合报告"):
+                                        comprehensive_report = gr.HTML(
+                                            value="""
+                                            <div style='text-align: center; padding: 40px; background: #f8f9fa;
+                                                        border-radius: 8px; border: 2px dashed #dee2e6;'>
+                                                <div style='font-size: 3em; margin-bottom: 15px;'>🤖</div>
+                                                <h3 style='color: #6c757d; margin: 0 0 10px 0;'>AI分析师团队待命中</h3>
+                                                <p style='color: #868e96; margin: 0;'>点击"开始全面分析"按钮，让AI为您生成专业分析报告</p>
+                                            </div>
+                                            """,
+                                            elem_classes=["result-display"]
+                                        )
 
                             # 分析师报告
                             with gr.TabItem("👥 分析师报告"):
@@ -3179,16 +3857,23 @@ def create_enhanced_interface():
                                     show_copy_button=True
                                 )
 
-            # LLM配置界面
-            with gr.TabItem("⚙️ LLM配置"):
-                gr.Markdown("## 🤖 LLM提供商配置")
+                            # LLM配置标签
+                            with gr.TabItem("⚙️ LLM配置", elem_classes=["main-tab"]):
+                                gr.HTML("""
+                                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                            color: white; padding: 15px; margin: -20px -20px 20px -20px;
+                                            border-radius: 12px 12px 0 0;">
+                                    <h3 style="margin: 0; font-size: 1.2em;">⚙️ LLM提供商配置</h3>
+                                    <p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 0.9em;">配置和管理AI语言模型提供商</p>
+                                </div>
+                                """)
 
-                with gr.Tabs():
-                    # 内置提供商配置
-                    with gr.TabItem("🏢 内置提供商"):
-                        with gr.Row():
-                            with gr.Column():
-                                gr.Markdown("### 配置API密钥")
+                                with gr.Tabs():
+                                    # 内置提供商配置
+                                    with gr.TabItem("🏢 内置提供商"):
+                                        with gr.Row():
+                                            with gr.Column():
+                                                gr.Markdown("### 配置API密钥")
 
                                 # DeepSeek配置
                                 with gr.Group():
@@ -3410,10 +4095,16 @@ def create_enhanced_interface():
                                     interactive=False
                                 )
 
-            # 智能体模型配置
-            with gr.TabItem("🤖 智能体配置"):
-                gr.Markdown("## 🤖 智能体模型配置")
-                gr.Markdown("为每个智能体选择使用的LLM模型，实现精细化配置")
+                            # 智能体配置标签
+                            with gr.TabItem("🤖 智能体配置", elem_classes=["main-tab"]):
+                                gr.HTML("""
+                                <div style="background: linear-gradient(135deg, #ff7b7b 0%, #667eea 100%);
+                                            color: white; padding: 15px; margin: -20px -20px 20px -20px;
+                                            border-radius: 12px 12px 0 0;">
+                                    <h3 style="margin: 0; font-size: 1.2em;">🤖 智能体模型配置</h3>
+                                    <p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 0.9em;">为每个智能体选择使用的LLM模型，实现精细化配置</p>
+                                </div>
+                                """)
 
                 with gr.Tabs():
                     # 分析师团队配置
@@ -3597,11 +4288,11 @@ def create_enhanced_interface():
 
                         # 通信日志表格
                         communication_logs_display = gr.Dataframe(
-                            headers=["时间", "智能体", "提供商", "模型", "状态", "提示长度", "响应长度"],
-                            datatype=["str", "str", "str", "str", "str", "str", "str"],
+                            headers=["序列号", "时间", "智能体", "提供商", "模型", "状态", "提示预览", "响应预览", "提示长度", "响应长度"],
+                            datatype=["str", "str", "str", "str", "str", "str", "str", "str", "str", "str"],
                             value=[],
-                            interactive=False,
-                            label="通信记录"
+                            interactive=True,  # 允许交互，支持点击
+                            label="通信记录 (点击序列号查看详情)"
                         )
 
                     with gr.Column(scale=1):
@@ -3622,31 +4313,33 @@ def create_enhanced_interface():
                 # 通信详情
                 with gr.Group():
                     gr.Markdown("### 🔍 通信详情")
+                    gr.Markdown("💡 **使用说明**: 点击上方表格中的任意行查看该通信的详细内容")
 
-                    selected_log_index = gr.Number(
-                        label="选择日志序号",
-                        value=0,
-                        minimum=0,
-                        info="输入日志序号查看详细内容"
-                    )
+                    # 隐藏的状态变量，用于存储选中的日志ID
+                    selected_log_id = gr.State(value=None)
+
+                    # 显示当前选中的日志信息
+                    current_log_info = gr.Markdown("📋 **当前选中**: 暂无选择")
 
                     with gr.Row():
                         with gr.Column():
                             gr.Markdown("#### 📤 发送的提示")
                             prompt_detail = gr.Textbox(
                                 label="提示内容",
-                                lines=8,
+                                lines=10,
                                 interactive=False,
-                                placeholder="选择日志查看提示内容..."
+                                placeholder="点击表格中的日志行查看提示内容...",
+                                max_lines=15
                             )
 
                         with gr.Column():
                             gr.Markdown("#### 📥 接收的响应")
                             response_detail = gr.Textbox(
                                 label="响应内容",
-                                lines=8,
+                                lines=10,
                                 interactive=False,
-                                placeholder="选择日志查看响应内容..."
+                                placeholder="点击表格中的日志行查看响应内容...",
+                                max_lines=15
                             )
 
             # 分析历史
@@ -4109,7 +4802,21 @@ def create_enhanced_interface():
         def load_agent_config():
             """重新加载智能体配置"""
             app.agent_model_config = app.load_agent_model_config()
-            return f"已重新加载 {len(app.agent_model_config)} 个智能体配置"
+
+            # 返回所有智能体的当前配置值，用于更新界面
+            config_values = []
+            agents = [
+                "market_analyst", "social_media_analyst", "news_analyst", "fundamentals_analyst",
+                "bull_researcher", "bear_researcher", "research_manager", "trader",
+                "aggressive_debator", "conservative_debator", "neutral_debator", "risk_manager",
+                "memory_manager", "signal_processor", "reflection_engine"
+            ]
+
+            for agent in agents:
+                config_values.append(app.agent_model_config.get(agent, "deepseek:deepseek-chat"))
+
+            status_msg = f"已重新加载 {len(app.agent_model_config)} 个智能体配置"
+            return [status_msg] + config_values
 
         def reset_agent_config():
             """重置智能体配置为默认"""
@@ -4126,15 +4833,18 @@ def create_enhanced_interface():
 
             # 转换为表格格式
             table_data = []
-            for i, log in enumerate(logs):
+            for log in logs:
                 table_data.append([
-                    log["timestamp"][:19],
-                    log["agent_id"],
-                    log["provider"],
-                    log["model"],
-                    "✅ 成功" if log["status"] == "success" else "❌ 失败",
-                    str(log["prompt_length"]),
-                    str(log["response_length"])
+                    str(log["id"]),  # 序列号
+                    log["timestamp"][:19],  # 时间
+                    log["agent_id"],  # 智能体
+                    log["provider"],  # 提供商
+                    log["model"],  # 模型
+                    "✅ 成功" if log["status"] == "success" else "❌ 失败",  # 状态
+                    log.get("prompt_preview", log.get("prompt", "")[:100] + "..."),  # 提示预览
+                    log.get("response_preview", log.get("response", "")[:100] + "..."),  # 响应预览
+                    str(log["prompt_length"]),  # 提示长度
+                    str(log["response_length"])  # 响应长度
                 ])
 
             # 计算统计信息
@@ -4175,17 +4885,38 @@ def create_enhanced_interface():
                 "most_used_provider": "无"
             }, result.get("message", "清空失败")
 
-        def get_log_detail(log_index):
-            """获取日志详情"""
+        def get_log_detail_by_id(log_id):
+            """通过日志ID获取详情"""
             try:
                 logs = app.get_communication_logs(1000)  # 获取更多日志用于查看
-                if 0 <= log_index < len(logs):
-                    log = logs[int(log_index)]
-                    return log.get("prompt", ""), log.get("response", "")
-                else:
-                    return "日志序号超出范围", "日志序号超出范围"
+                for log in logs:
+                    if log.get("id") == int(log_id):
+                        info_text = f"📋 **序列号 {log_id}** | {log['timestamp'][:19]} | {log['agent_id']} → {log['provider']}:{log['model']}"
+                        return (
+                            info_text,
+                            log.get("prompt", "无提示内容"),
+                            log.get("response", "无响应内容")
+                        )
+                return "未找到对应的日志记录", "日志不存在", "日志不存在"
             except Exception as e:
-                return f"获取日志失败: {str(e)}", ""
+                error_msg = f"获取日志失败: {str(e)}"
+                return error_msg, error_msg, error_msg
+
+        def handle_table_select(evt: gr.SelectData):
+            """处理表格选择事件"""
+            try:
+                if evt.index is not None and len(evt.index) >= 2:
+                    row_index = evt.index[0]
+                    # 获取当前显示的日志数据
+                    logs = app.get_communication_logs(50)
+                    if 0 <= row_index < len(logs):
+                        log = logs[row_index]
+                        log_id = log.get("id", row_index + 1)
+                        return get_log_detail_by_id(log_id)
+                return "请选择有效的日志行", "无数据", "无数据"
+            except Exception as e:
+                error_msg = f"处理选择失败: {str(e)}"
+                return error_msg, error_msg, error_msg
 
         # 模拟通信日志（用于演示）
         def suggest_models_for_provider(provider_name):
@@ -4376,12 +5107,7 @@ def create_enhanced_interface():
             ]
         )
 
-        # 中断按钮事件绑定
-        interrupt_btn.click(
-            fn=interrupt_analysis,
-            inputs=[],
-            outputs=[status_display]
-        )
+        # 中断按钮已移除，不需要事件绑定
 
         # 导出报告事件绑定
         export_report_btn.click(
@@ -4654,7 +5380,17 @@ def create_enhanced_interface():
 
         load_agent_config_btn.click(
             fn=load_agent_config,
-            outputs=[agent_config_status]
+            outputs=[
+                agent_config_status,
+                # 分析师团队
+                market_analyst_model, sentiment_analyst_model, news_analyst_model, fundamentals_analyst_model,
+                # 研究团队
+                bull_researcher_model, bear_researcher_model, research_manager_model, trader_model,
+                # 风险管理团队
+                aggressive_debator_model, conservative_debator_model, neutral_debator_model, risk_manager_model,
+                # 支持系统
+                memory_manager_model, signal_processor_model, reflection_engine_model
+            ]
         )
 
         reset_agent_config_btn.click(
@@ -4673,10 +5409,10 @@ def create_enhanced_interface():
             outputs=[communication_logs_display, communication_stats, agent_config_status]
         )
 
-        selected_log_index.change(
-            fn=get_log_detail,
-            inputs=[selected_log_index],
-            outputs=[prompt_detail, response_detail]
+        # 绑定表格选择事件
+        communication_logs_display.select(
+            fn=handle_table_select,
+            outputs=[current_log_info, prompt_detail, response_detail]
         )
 
         # 添加模拟通信按钮（演示用）
@@ -4695,15 +5431,14 @@ def create_enhanced_interface():
             outputs=[history_display]
         )
 
-        # 定期更新系统状态
-        interface.load(
-            fn=update_system_status,
-            outputs=[system_status_display]
-        )
+        # 系统状态显示已移除，不需要定期更新
 
     return interface
 
 if __name__ == "__main__":
+    # 显示赞助信息，校验失败时退出程序
+    display_donation_info(exit_on_failure=True)
+
     # 创建并启动界面
     interface = create_enhanced_interface()
     interface.launch(

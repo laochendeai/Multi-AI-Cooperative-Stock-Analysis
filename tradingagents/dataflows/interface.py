@@ -7,7 +7,12 @@ import asyncio
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from .akshare_client import AkShareClient
+try:
+    from .akshare_client import AkShareClient
+    AKSHARE_CLIENT_AVAILABLE = True
+except ImportError:
+    AKSHARE_CLIENT_AVAILABLE = False
+    AkShareClient = None
 from .cache_manager import CacheManager
 
 logger = logging.getLogger(__name__)
@@ -16,11 +21,19 @@ class DataInterface:
     """统一数据接口"""
     
     def __init__(self):
-        self.akshare_client = AkShareClient()
-        self.cache_manager = CacheManager()
-        self.data_sources = {
-            "akshare": self.akshare_client
-        }
+        if AKSHARE_CLIENT_AVAILABLE:
+            self.akshare_client = AkShareClient()
+            self.data_sources = {
+                "akshare": self.akshare_client
+            }
+        else:
+            self.akshare_client = None
+            self.data_sources = {}
+
+        try:
+            self.cache_manager = CacheManager()
+        except:
+            self.cache_manager = None
     
     async def get_comprehensive_data(self, symbol: str) -> Dict[str, Any]:
         """获取股票的综合数据"""

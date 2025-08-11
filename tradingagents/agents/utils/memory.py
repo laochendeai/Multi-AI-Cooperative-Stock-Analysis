@@ -1,14 +1,30 @@
 """
-记忆管理系统 - 基于ChromaDB的向量数据库
+记忆管理系统 - 基于ChromaDB的向量数据库 (修复版)
 """
 
 import asyncio
 import logging
 import os
+import sys
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 import json
 
+# 添加项目根目录到路径
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
+
+# 优先使用修复版ChromaDB记忆管理器
+try:
+    from core.chromadb_memory import create_chromadb_memory_manager
+    CHROMADB_MEMORY_AVAILABLE = True
+    logger = logging.getLogger(__name__)
+    logger.info("✅ 使用修复版ChromaDB记忆系统")
+except ImportError:
+    CHROMADB_MEMORY_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("⚠️ 修复版ChromaDB不可用，使用原版")
+
+# 备用：原版ChromaDB
 try:
     import chromadb
     from chromadb.config import Settings
@@ -19,40 +35,65 @@ except ImportError:
     chromadb = None
     SentenceTransformer = None
 
-from ...config.default_config import MEMORY_CONFIG
+try:
+    from ...config.default_config import MEMORY_CONFIG
+except ImportError:
+    # 使用适配器配置
+    from core.config_adapter import MEMORY_CONFIG
 
 logger = logging.getLogger(__name__)
 
 class MemoryManager:
-    """智能体记忆管理器"""
-    
+    """智能体记忆管理器 - 修复版"""
+
     def __init__(self, config: Dict[str, Any] = None):
         self.config = config or MEMORY_CONFIG
-        self.client = None
-        self.collection = None
-        self.embedding_model = None
         self.initialized = False
-        
-        if not CHROMADB_AVAILABLE:
-            logger.warning("ChromaDB不可用，记忆系统将使用简单存储")
+
+        # 优先使用修复版ChromaDB记忆管理器
+        if CHROMADB_MEMORY_AVAILABLE:
+            logger.info("🧠 使用修复版ChromaDB记忆管理器")
+            self.chromadb_manager = create_chromadb_memory_manager(self.config)
+            self.use_chromadb_manager = True
+        else:
+            logger.warning("修复版ChromaDB不可用，使用原版实现")
+            self.use_chromadb_manager = False
+            self.client = None
+            self.collection = None
+            self.embedding_model = None
             self.memories = []  # 简单内存存储
     
     async def initialize(self):
         """初始化记忆系统"""
         try:
+            if self.use_chromadb_manager:
+                # 使用修复版ChromaDB记忆管理器 - 强制成功
+                logger.info("🔧 强制使用ChromaDB，禁用简单存储回退")
+                success = await self.chromadb_manager.initialize()
+                if success:
+                    self.initialized = True
+                    logger.info("✅ 修复版ChromaDB记忆系统初始化成功")
+                    return
+                else:
+                    logger.error("❌ 修复版ChromaDB初始化失败，系统停止")
+                    raise Exception("ChromaDB初始化失败，必须修复配置问题")
+
+            # 使用原版实现
             if CHROMADB_AVAILABLE:
                 await self._initialize_chromadb()
             else:
                 await self._initialize_simple_storage()
-            
+
             self.initialized = True
             logger.info("记忆系统初始化成功")
-            
+
         except Exception as e:
             logger.error(f"记忆系统初始化失败: {e}")
-            # 降级到简单存储
-            await self._initialize_simple_storage()
-            self.initialized = True
+            logger.error("❌ 禁用简单存储回退，必须修复ChromaDB")
+            # 打印详细错误信息
+            import traceback
+            logger.error(f"详细错误: {traceback.format_exc()}")
+            raise Exception(f"记忆系统初始化失败，必须修复ChromaDB: {e}")
     
     async def _initialize_chromadb(self):
         """初始化ChromaDB"""
@@ -76,8 +117,16 @@ class MemoryManager:
             self.collection = self.client.create_collection(collection_name)
         
         # 初始化嵌入模型
-        model_name = self.config["chromadb"]["embedding_model"]
-        self.embedding_model = SentenceTransformer(model_name)
+        try:
+            model_name = self.config["chromadb"]["embedding_model"]
+            self.embedding_model = SentenceTransformer(model_name)
+        except Exception as e:
+            logger.warning(f"嵌入模型初始化失败: {e}")
+            logger.info("将使用简单存储模式")
+            self.embedding_model = None
+            # 降级到简单存储
+            await self._initialize_simple_storage()
+            return
         
         logger.info(f"ChromaDB初始化完成，集合: {collection_name}")
     
@@ -109,10 +158,14 @@ class MemoryManager:
         metadata["timestamp"] = datetime.now().isoformat()
         
         try:
-            if CHROMADB_AVAILABLE and self.collection:
-                # 使用ChromaDB存储
+            if self.use_chromadb_manager and self.chromadb_manager:
+                # 使用修复版ChromaDB记忆管理器
+                return await self.chromadb_manager.add_memory(content, metadata)
+
+            elif CHROMADB_AVAILABLE and self.collection and self.embedding_model:
+                # 使用原版ChromaDB存储
                 embedding = self.embedding_model.encode([content])[0].tolist()
-                
+
                 self.collection.add(
                     embeddings=[embedding],
                     documents=[content],
@@ -126,15 +179,15 @@ class MemoryManager:
                     "content": content,
                     "metadata": metadata
                 })
-                
+
                 # 限制记忆数量
                 max_memories = self.config.get("max_memories", 1000)
                 if len(self.memories) > max_memories:
                     self.memories = self.memories[-max_memories:]
-            
+
             logger.debug(f"添加记忆: {memory_id}")
             return memory_id
-            
+
         except Exception as e:
             logger.error(f"添加记忆失败: {e}")
             return ""
@@ -162,8 +215,12 @@ class MemoryManager:
         similarity_threshold = similarity_threshold or self.config.get("similarity_threshold", 0.7)
         
         try:
-            if CHROMADB_AVAILABLE and self.collection:
-                # 使用ChromaDB搜索
+            if self.use_chromadb_manager and self.chromadb_manager:
+                # 使用修复版ChromaDB记忆管理器
+                return await self.chromadb_manager.search_memories(query, agent_id, limit)
+
+            elif CHROMADB_AVAILABLE and self.collection and self.embedding_model:
+                # 使用原版ChromaDB搜索
                 query_embedding = self.embedding_model.encode([query])[0].tolist()
                 
                 # 构建过滤条件
