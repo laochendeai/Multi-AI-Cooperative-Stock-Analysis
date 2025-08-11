@@ -1,0 +1,140 @@
+name: QR Code Security Check
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'assets/donation_qrcode.png'
+      - 'assets/donation_qrcode.sha256'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'assets/donation_qrcode.png'
+      - 'assets/donation_qrcode.sha256'
+
+jobs:
+  verify-qrcode:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        
+    - name: Verify QR Code Integrity
+      run: |
+        python -c "
+        import sys
+        sys.path.append('.')
+        from core.qrcode_security import QRCodeSecurityManager
+        
+        manager = QRCodeSecurityManager()
+        info = manager.get_qrcode_info()
+        
+        print('QR Code Security Check Results:')
+        print(f'Path: {info[\"path\"]}')
+        print(f'Exists: {info[\"exists\"]}')
+        print(f'Size: {info[\"size\"]} bytes')
+        print(f'Hash: {info[\"hash\"]}')
+        print(f'Verified: {info[\"verified\"]}')
+        
+        if not info['verified']:
+            print('❌ QR Code verification failed!')
+            sys.exit(1)
+        else:
+            print('✅ QR Code verification passed!')
+        "
+        
+    - name: Check file permissions
+      run: |
+        if [ -f "assets/donation_qrcode.png" ]; then
+          echo "Checking file permissions..."
+          ls -la assets/donation_qrcode.png
+          
+          # 检查文件是否可读
+          if [ -r "assets/donation_qrcode.png" ]; then
+            echo "✅ File is readable"
+          else
+            echo "❌ File is not readable"
+            exit 1
+          fi
+        else
+          echo "❌ QR code file not found"
+          exit 1
+        fi
+        
+    - name: Validate checksum file format
+      run: |
+        if [ -f "assets/donation_qrcode.sha256" ]; then
+          echo "Validating checksum file format..."
+          
+          # 检查文件内容格式
+          checksum=$(cat assets/donation_qrcode.sha256)
+          if [[ $checksum =~ ^[a-f0-9]{64}$ ]]; then
+            echo "✅ Checksum format is valid: $checksum"
+          else
+            echo "❌ Invalid checksum format: $checksum"
+            exit 1
+          fi
+        else
+          echo "❌ Checksum file not found"
+          exit 1
+        fi
+        
+    - name: Security scan
+      run: |
+        echo "Running security scan on QR code file..."
+        
+        # 检查文件大小（防止过大的文件）
+        if [ -f "assets/donation_qrcode.png" ]; then
+          size=$(stat -f%z "assets/donation_qrcode.png" 2>/dev/null || stat -c%s "assets/donation_qrcode.png")
+          max_size=1048576  # 1MB
+          
+          if [ $size -gt $max_size ]; then
+            echo "❌ File size too large: $size bytes (max: $max_size bytes)"
+            exit 1
+          else
+            echo "✅ File size acceptable: $size bytes"
+          fi
+        fi
+        
+        # 检查文件类型
+        file_type=$(file assets/donation_qrcode.png)
+        if [[ $file_type == *"PNG image"* ]]; then
+          echo "✅ File type is PNG image"
+        else
+          echo "❌ Invalid file type: $file_type"
+          exit 1
+        fi
+        
+    - name: Generate security report
+      run: |
+        echo "# QR Code Security Report" > qr_security_report.md
+        echo "" >> qr_security_report.md
+        echo "## Verification Results" >> qr_security_report.md
+        echo "" >> qr_security_report.md
+        echo "- **File Path**: assets/donation_qrcode.png" >> qr_security_report.md
+        echo "- **File Size**: $(stat -f%z assets/donation_qrcode.png 2>/dev/null || stat -c%s assets/donation_qrcode.png) bytes" >> qr_security_report.md
+        echo "- **SHA-256**: $(cat assets/donation_qrcode.sha256)" >> qr_security_report.md
+        echo "- **Verification**: ✅ PASSED" >> qr_security_report.md
+        echo "- **Scan Date**: $(date -u)" >> qr_security_report.md
+        echo "" >> qr_security_report.md
+        echo "## Security Status" >> qr_security_report.md
+        echo "" >> qr_security_report.md
+        echo "All security checks passed. The QR code is verified and safe to use." >> qr_security_report.md
+        
+        cat qr_security_report.md
+        
+    - name: Upload security report
+      uses: actions/upload-artifact@v3
+      with:
+        name: qr-security-report
+        path: qr_security_report.md

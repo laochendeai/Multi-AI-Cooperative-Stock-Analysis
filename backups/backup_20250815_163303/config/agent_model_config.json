@@ -1,0 +1,14 @@
+{
+  "market_analyst": "moonshot:moonshot-v1-8k",
+  "sentiment_analyst": "deepseek:deepseek-chat",
+  "news_analyst": "moonshot:moonshot-v1-8k",
+  "fundamentals_analyst": "moonshot:moonshot-v1-8k",
+  "bull_researcher": "moonshot:moonshot-v1-32k",
+  "bear_researcher": "moonshot:moonshot-v1-32k",
+  "research_manager": "moonshot:moonshot-v1-32k",
+  "aggressive_debator": "moonshot:moonshot-v1-8k",
+  "conservative_debator": "moonshot:moonshot-v1-8k",
+  "neutral_debator": "moonshot:moonshot-v1-8k",
+  "risk_manager": "moonshot:moonshot-v1-8k",
+  "trader": "moonshot:moonshot-v1-8k"
+}

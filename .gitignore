@@ -1,11 +1,122 @@
-# Python
-__pycache__/
-*.py[cod]
-*.log
+# TradingAgents - 安全配置
 
-# Data files
+# 🔐 敏感配置文件 - 包含API密钥
+config/llm_config.json
+config/agent_model_config.json
+
+# 🔑 环境变量和密钥文件
+.env
+.env.local
+.env.production
+*.env
+**/api_keys.json
+**/secrets.json
+**/credentials.json
+**/*_key.json
+**/*_secret.json
+
+# 📊 数据库和缓存文件
 *.db
+*.sqlite
+*.sqlite3
+data/trading_data.db
+data/memory/
+data/cache/
+data/test_*/
 *.cache
 
-# Environment
-.env
+# 📝 日志文件
+logs/
+*.log
+*.log.*
+
+# 🐍 Python缓存文件
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 🌐 虚拟环境
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+aistock/
+
+# 💻 IDE和编辑器文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.code-workspace
+
+# 📄 报告文件（可能包含敏感分析数据）
+reports/*.json
+reports/*.txt
+# 保留示例报告
+!reports/README.md
+
+# 🧪 测试和调试文件
+test_*.py
+*_test.py
+debug_*.py
+*_debug.py
+test_result_*.txt
+debug_*.json
+trading_analysis_*.json
+analysis_result_*.json
+
+# 🔬 测试覆盖率
+.pytest_cache/
+.coverage
+.nyc_output
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# 🧠 AI模型和数据文件
+chroma_db/
+*.chroma
+*.model
+*.pkl
+*.pickle
+
+# 📦 压缩文件
+*.zip
+*.tar.gz
+*.rar
+
+# 👤 个人配置
+personal_config.json
+user_settings.json
+my_*.json
+
+# 🔧 临时文件
+*.tmp
+*.temp
+*.bak
+*.backup
+*.orig
