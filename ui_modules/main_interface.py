@@ -64,34 +64,43 @@ class ModularInterface:
             # 页面头部
             create_header_component()
             
-            # 模块信息显示
-            gr.HTML("""
-            <div class="module-info">
-                <h3>🧩 模块化架构信息</h3>
-                <p><strong>核心模块:</strong> UI核心、分析处理、LLM管理、报告生成、事件处理</p>
-                <p><strong>组件模块:</strong> 主要组件、样式管理、工具函数</p>
-                <p><strong>架构优势:</strong> 易维护、可扩展、高内聚、低耦合</p>
-            </div>
-            """)
-            
-            # 主要内容区域
+            # 主要内容区域 - 2:7:1 三栏布局
             with gr.Row(equal_height=True):
-                # 左侧控制面板 (30%)
-                with gr.Column(scale=3, min_width=320):
+                # 左侧控制面板 (20%)
+                with gr.Column(scale=2, min_width=250):
                     # 分析输入组件
-                    (stock_input, analyze_btn, analysis_depth, 
+                    (stock_input, analyze_btn, analysis_depth,
                      export_format, selected_agents) = create_analysis_input_components()
-                    
-                    # 系统状态组件
-                    (system_status, refresh_btn, export_btn, 
-                     reset_btn) = create_system_status_components(self.ui)
-                
-                # 右侧结果显示 (70%)
+
+                # 中间主要内容区域 (70%)
                 with gr.Column(scale=7, min_width=600):
                     # 结果显示组件
-                    (analysis_output, chart_output, log_output, 
-                     report_list, report_content, refresh_reports_btn, 
+                    (analysis_output, chart_output, log_output,
+                     report_list, report_content, refresh_reports_btn,
                      delete_report_btn, view_report_btn) = create_results_components()
+
+                # 右侧赞赏码显示 (10%)
+                with gr.Column(scale=1, min_width=200):
+                    # 赞赏码显示
+                    gr.Markdown("### 💝 支持项目")
+                    gr.Image(
+                        value="assets/donation_code.png",
+                        label="赞赏码",
+                        show_label=False,
+                        container=False,
+                        height=200,
+                        width=200,
+                        interactive=False
+                    )
+                    gr.Markdown(
+                        "感谢您的支持！\n您的赞赏是我们持续改进的动力。",
+                        elem_classes=["donation-text"]
+                    )
+
+                    # 系统状态组件（紧凑显示）
+                    with gr.Accordion("📊 系统状态", open=False):
+                        (system_status, refresh_btn, export_btn,
+                         reset_btn) = create_system_status_components(self.ui)
             
             # 配置标签页
             with gr.Tabs():
@@ -152,7 +161,6 @@ class ModularInterface:
         with gr.Row():
             reload_modules_btn = gr.Button("🔄 重载模块", variant="secondary")
             test_modules_btn = gr.Button("🧪 测试模块", variant="primary")
-            module_info_btn = gr.Button("ℹ️ 模块信息", variant="secondary")
         
         # 模块操作结果显示
         module_operation_result = gr.Textbox(
@@ -170,11 +178,6 @@ class ModularInterface:
         
         test_modules_btn.click(
             fn=self._test_all_modules,
-            outputs=module_operation_result
-        )
-        
-        module_info_btn.click(
-            fn=self._get_module_info,
             outputs=module_operation_result
         )
     
@@ -301,37 +304,7 @@ class ModularInterface:
         
         return "\n".join(results)
     
-    def _get_module_info(self):
-        """获取模块信息"""
-        info = [
-            "🧩 TradingAgents 模块化架构信息",
-            "=" * 40,
-            "",
-            "📦 核心模块:",
-            "  • core_ui.py - UI核心逻辑和状态管理",
-            "  • analysis_handler.py - 股票分析处理",
-            "  • llm_handler.py - LLM配置和连接管理",
-            "  • report_handler.py - 报告生成和导出",
-            "  • event_handler.py - 事件绑定和处理",
-            "",
-            "🎨 组件模块:",
-            "  • main_components.py - 主要UI组件",
-            "  • main_interface.py - 界面集成管理",
-            "",
-            "🔧 架构优势:",
-            "  • 高内聚低耦合的模块设计",
-            "  • 易于维护和扩展",
-            "  • 支持热插拔和独立测试",
-            "  • 清晰的职责分离",
-            "",
-            "📊 模块统计:",
-            f"  • 总模块数: 7个",
-            f"  • 处理器模块: 4个",
-            f"  • 组件模块: 2个",
-            f"  • 核心模块: 1个"
-        ]
-        
-        return "\n".join(info)
+
 
 def create_modular_interface():
     """创建模块化界面"""
@@ -353,11 +326,11 @@ if __name__ == "__main__":
         print("   • 📊 模块状态监控")
         print("   • 🎨 可定制UI组件")
         
-        print("\n🌟 现在可以在浏览器中访问: http://localhost:7863")
-        
+        print("\n🌟 现在可以在浏览器中访问: http://localhost:7864")
+
         interface.launch(
             server_name="0.0.0.0",
-            server_port=7863,
+            server_port=7864,
             share=False,
             inbrowser=True
         )

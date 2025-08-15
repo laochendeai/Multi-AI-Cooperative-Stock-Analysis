@@ -205,26 +205,7 @@ def create_config_components():
                     value=True
                 )
             
-            gr.Markdown("#### ❓ 快速帮助")
-            gr.Markdown("""
-            **模块化特性:**
-            - 🧩 组件化架构，易于维护
-            - 🔄 热插拔模块支持
-            - 📊 独立的处理器模块
-            - 🎨 可定制UI组件
-            
-            **使用步骤:**
-            1. 配置LLM提供商API密钥
-            2. 输入股票代码进行分析
-            3. 查看结果并导出报告
-            4. 管理历史分析记录
-            
-            **支持格式:**
-            - JSON: 结构化数据
-            - TXT: 纯文本报告
-            - HTML: 网页格式
-            - MD: Markdown文档
-            """)
+
     
     return (provider_select, api_key_input, save_config_btn, test_config_btn, 
             clear_config_btn, config_status, provider_status, max_agents, 
@@ -245,23 +226,47 @@ def get_custom_css():
     """获取自定义CSS样式"""
     return """
     <style>
-    .compact-header { margin-bottom: 10px !important; }
-    .compact-title { margin: 8px 0 !important; font-size: 1.1em !important; }
-    .result-area { max-height: 500px !important; overflow-y: auto !important; }
-    .gradio-container .block { padding: 6px !important; margin: 3px 0 !important; }
-    .status-indicator { background: #f0f8ff; padding: 8px; border-radius: 6px; margin: 5px 0; }
-    @media (max-width: 1366px) {
-        .gradio-container { max-width: 100% !important; padding: 8px !important; }
+    /* 单屏幕显示优化 */
+    .gradio-container {
+        max-width: none !important;
+        height: 100vh !important;
+        overflow: hidden !important;
+        padding: 5px !important;
     }
-    ::-webkit-scrollbar { width: 6px; }
-    ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb { background: #888; border-radius: 3px; }
-    .module-info { 
-        background: linear-gradient(45deg, #f0f8ff, #e6f3ff); 
-        padding: 10px; 
-        border-radius: 8px; 
-        border-left: 4px solid #667eea; 
-        margin: 10px 0; 
+
+    /* 赞赏码样式 */
+    .donation-text {
+        font-size: 11px !important;
+        text-align: center !important;
+        color: #666 !important;
+        margin: 5px 0 !important;
+        line-height: 1.2 !important;
+    }
+
+    /* 紧凑布局 */
+    .compact-header { margin-bottom: 5px !important; }
+    .compact-title { margin: 5px 0 !important; font-size: 1.0em !important; }
+    .result-area { max-height: 400px !important; overflow-y: auto !important; }
+    .gradio-container .block { padding: 3px !important; margin: 2px 0 !important; }
+    .status-indicator { background: #f0f8ff; padding: 5px; border-radius: 4px; margin: 3px 0; }
+
+    /* 响应式设计 */
+    @media (max-width: 1366px) {
+        .gradio-container { max-width: 100% !important; padding: 3px !important; }
+    }
+
+    /* 滚动条样式 */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 2px; }
+    ::-webkit-scrollbar-thumb { background: #888; border-radius: 2px; }
+
+    /* 模块信息样式 */
+    .module-info {
+        background: linear-gradient(45deg, #f0f8ff, #e6f3ff);
+        padding: 8px;
+        border-radius: 6px;
+        border-left: 3px solid #667eea;
+        margin: 5px 0;
     }
     </style>
     """

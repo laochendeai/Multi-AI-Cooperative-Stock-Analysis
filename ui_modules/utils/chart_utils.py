@@ -7,9 +7,48 @@ TradingAgents 图表工具模块
 
 import sys
 import os
+import platform
 
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+# 配置中文字体支持
+def setup_chinese_font():
+    """配置matplotlib中文字体支持"""
+    try:
+        import matplotlib.pyplot as plt
+        import warnings
+
+        # 抑制字体相关警告
+        warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
+
+        # 根据操作系统选择合适的中文字体
+        system = platform.system()
+
+        if system == "Windows":
+            # Windows系统常用中文字体，优先使用支持更多字符的字体
+            fonts = ['Microsoft YaHei', 'SimHei', 'SimSun', 'KaiTi', 'Arial Unicode MS']
+        elif system == "Darwin":  # macOS
+            # macOS系统中文字体
+            fonts = ['PingFang SC', 'Hiragino Sans GB', 'STHeiti', 'Arial Unicode MS']
+        else:  # Linux
+            # Linux系统中文字体
+            fonts = ['WenQuanYi Micro Hei', 'Noto Sans CJK SC', 'Source Han Sans SC', 'DejaVu Sans']
+
+        # 设置中文字体
+        plt.rcParams['font.sans-serif'] = fonts
+        plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
+        plt.rcParams['font.size'] = 10  # 设置默认字体大小
+
+        print(f"✅ 中文字体配置完成: {fonts[0]}")
+        return True
+
+    except Exception as e:
+        print(f"⚠️ 字体配置失败: {e}")
+        return False
+
+# 初始化中文字体支持
+setup_chinese_font()
 
 class ChartGenerator:
     """图表生成器"""
@@ -184,12 +223,11 @@ class ChartGenerator:
         """安全返回图表结果，确保不会返回字符串给Plot组件"""
         if chart_result is None:
             return self.generate_empty_chart("图表生成失败")
-        
+
         # 检查是否是matplotlib图表对象
         try:
-            import matplotlib.pyplot as plt
             import matplotlib.figure
-            
+
             if isinstance(chart_result, matplotlib.figure.Figure):
                 return chart_result
             elif hasattr(chart_result, 'gcf'):  # pyplot对象
@@ -197,7 +235,7 @@ class ChartGenerator:
             else:
                 # 如果不是图表对象，生成错误图表
                 return self.generate_error_chart("返回的不是有效的图表对象")
-                
+
         except Exception as e:
             return self.generate_error_chart(f"图表验证失败: {str(e)}")
 

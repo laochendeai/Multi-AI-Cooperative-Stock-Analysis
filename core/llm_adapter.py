@@ -88,10 +88,26 @@ class LLMAdapter:
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2
                 else:
-                    # 最后一次尝试失败，返回默认响应
+                    # 最后一次尝试失败，返回更有用的默认响应
                     logger.error(f"所有LLM调用尝试失败: {e}")
-                    return f"由于API限制，{agent_id}暂时无法提供分析。请稍后重试。"
-    
+                    return self._get_fallback_response(agent_id, prompt)
+
+    def _get_fallback_response(self, agent_id: str, prompt: str) -> str:
+        """获取智能体的备用响应"""
+        # 根据智能体类型和提示内容生成更有意义的备用响应
+        fallback_responses = {
+            "market_analyst": "技术分析服务暂时不可用。建议关注股票的价格趋势、成交量变化和关键技术指标如RSI、MACD等。",
+            "sentiment_analyst": "情感分析服务暂时不可用。建议关注市场整体情绪、投资者信心指数和社交媒体讨论热度。",
+            "news_analyst": "新闻分析服务暂时不可用。建议关注公司最新公告、行业动态和宏观经济新闻对股价的影响。",
+            "fundamentals_analyst": "基本面分析服务暂时不可用。建议关注公司财务报表、盈利能力、估值水平和行业比较。",
+            "bull_researcher": "多头研究服务暂时不可用。建议从积极角度分析公司发展前景、市场机会和增长潜力。",
+            "bear_researcher": "空头研究服务暂时不可用。建议从谨慎角度分析潜在风险、市场挑战和不确定因素。",
+            "risk_manager": "风险评估服务暂时不可用。建议综合考虑市场风险、流动性风险、信用风险和公司特定风险。"
+        }
+
+        base_response = fallback_responses.get(agent_id, f"{agent_id}分析服务暂时不可用")
+        return f"{base_response}\n\n注意：此为系统默认建议，请结合其他信息源进行综合判断。"
+
     async def get_llm_response(self, prompt: str, context: Dict[str, Any], agent_id: str = "default") -> str:
         """
         获取LLM响应的便捷方法

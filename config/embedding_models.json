@@ -1,0 +1,183 @@
+{
+  "embedding_models": {
+    "description": "嵌入模型配置文件 - 定义可用的嵌入模型和回退策略",
+    "version": "1.0.0",
+    "last_updated": "2025-08-15",
+    
+    "primary_models": [
+      {
+        "name": "sentence-transformers/all-MiniLM-L6-v2",
+        "description": "高质量通用嵌入模型",
+        "dimensions": 384,
+        "language_support": ["en", "zh", "multilingual"],
+        "size_mb": 90,
+        "performance": "high",
+        "stability": "stable"
+      },
+      {
+        "name": "paraphrase-MiniLM-L6-v2",
+        "description": "轻量级释义嵌入模型",
+        "dimensions": 384,
+        "language_support": ["en", "zh"],
+        "size_mb": 90,
+        "performance": "medium",
+        "stability": "very_stable"
+      }
+    ],
+    
+    "fallback_models": [
+      {
+        "name": "all-MiniLM-L6-v2",
+        "description": "简化版MiniLM模型",
+        "dimensions": 384,
+        "language_support": ["en", "zh"],
+        "size_mb": 90,
+        "performance": "medium",
+        "stability": "stable"
+      },
+      {
+        "name": "sentence-transformers/paraphrase-MiniLM-L6-v2",
+        "description": "官方释义模型",
+        "dimensions": 384,
+        "language_support": ["en", "zh"],
+        "size_mb": 90,
+        "performance": "medium",
+        "stability": "stable"
+      },
+      {
+        "name": "distilbert-base-nli-mean-tokens",
+        "description": "DistilBERT NLI模型",
+        "dimensions": 768,
+        "language_support": ["en"],
+        "size_mb": 250,
+        "performance": "high",
+        "stability": "stable"
+      }
+    ],
+    
+    "simple_embedding": {
+      "name": "simple_hash_embedding",
+      "description": "基于哈希的简单嵌入方法",
+      "dimensions": 384,
+      "language_support": ["universal"],
+      "size_mb": 0,
+      "performance": "low",
+      "stability": "very_stable",
+      "use_case": "网络不可用或所有模型都失败时的最后备选"
+    },
+    
+    "cache_settings": {
+      "cache_directory": "data/models",
+      "auto_cleanup": true,
+      "max_cache_size_gb": 5,
+      "cleanup_interval_days": 30,
+      "verify_integrity": true
+    },
+    
+    "download_settings": {
+      "timeout_seconds": 300,
+      "retry_attempts": 3,
+      "retry_delay_seconds": 5,
+      "use_mirror": false,
+      "mirror_urls": [
+        "https://hf-mirror.com",
+        "https://huggingface.co"
+      ]
+    },
+    
+    "error_handling": {
+      "json_decode_error": {
+        "action": "cleanup_and_retry",
+        "description": "清理损坏缓存并重试下载"
+      },
+      "network_error": {
+        "action": "try_fallback_model",
+        "description": "尝试使用备选模型"
+      },
+      "permission_error": {
+        "action": "change_cache_directory",
+        "description": "更改缓存目录到用户可写位置"
+      },
+      "disk_space_error": {
+        "action": "use_simple_embedding",
+        "description": "使用简单嵌入方法"
+      },
+      "model_load_error": {
+        "action": "try_next_model",
+        "description": "尝试下一个候选模型"
+      }
+    },
+    
+    "performance_optimization": {
+      "device": "cpu",
+      "batch_size": 32,
+      "max_seq_length": 512,
+      "normalize_embeddings": true,
+      "use_fast_tokenizer": true
+    },
+    
+    "monitoring": {
+      "log_model_loading": true,
+      "log_embedding_time": false,
+      "log_cache_operations": true,
+      "alert_on_fallback": true
+    },
+    
+    "compatibility": {
+      "min_sentence_transformers_version": "2.0.0",
+      "max_sentence_transformers_version": "6.0.0",
+      "supported_python_versions": ["3.8", "3.9", "3.10", "3.11", "3.12"],
+      "supported_platforms": ["windows", "linux", "macos"]
+    },
+    
+    "troubleshooting": {
+      "common_issues": [
+        {
+          "issue": "Expecting value: line 1 column 1 (char 0)",
+          "cause": "JSON文件损坏或下载不完整",
+          "solution": "清理模型缓存并重新下载"
+        },
+        {
+          "issue": "ConnectionError",
+          "cause": "网络连接问题",
+          "solution": "检查网络连接或使用离线模型"
+        },
+        {
+          "issue": "OSError: [Errno 28] No space left on device",
+          "cause": "磁盘空间不足",
+          "solution": "清理磁盘空间或使用简单嵌入方法"
+        },
+        {
+          "issue": "PermissionError",
+          "cause": "缓存目录权限不足",
+          "solution": "更改缓存目录或修改权限"
+        }
+      ],
+      
+      "diagnostic_commands": [
+        "python -c \"import sentence_transformers; print(sentence_transformers.__version__)\"",
+        "python tools/clean_model_cache.py",
+        "python test_embedding_model_fix.py"
+      ]
+    },
+    
+    "recommended_setup": {
+      "for_development": {
+        "primary_model": "paraphrase-MiniLM-L6-v2",
+        "cache_directory": "data/models",
+        "enable_fallback": true
+      },
+      "for_production": {
+        "primary_model": "sentence-transformers/all-MiniLM-L6-v2",
+        "cache_directory": "/opt/models",
+        "enable_fallback": true,
+        "preload_models": true
+      },
+      "for_offline": {
+        "primary_model": "simple_hash_embedding",
+        "cache_directory": "local_models",
+        "enable_fallback": false
+      }
+    }
+  }
+}

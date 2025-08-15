@@ -130,36 +130,123 @@ class ChromaDBMemoryManager:
     
     async def _initialize_embedding_model(self):
         """初始化嵌入模型"""
-        try:
-            from sentence_transformers import SentenceTransformer
-            
-            model_name = self.config["embedding_model"]
-            logger.info(f"加载嵌入模型: {model_name}")
-            
-            # 使用更稳定的模型加载方式
-            self.embedding_model = SentenceTransformer(
-                model_name,
-                cache_folder="data/models",  # 指定缓存目录
-                device="cpu"  # 强制使用CPU，避免GPU问题
-            )
-            
-            logger.info("嵌入模型加载成功")
-            
-        except Exception as e:
-            logger.error(f"嵌入模型加载失败: {e}")
-            # 尝试使用更小的模型
+        # 定义备选模型列表，按优先级排序
+        model_candidates = [
+            "sentence-transformers/all-MiniLM-L6-v2",
+            "paraphrase-MiniLM-L6-v2",
+            "all-MiniLM-L6-v2",
+            "sentence-transformers/paraphrase-MiniLM-L6-v2",
+            "distilbert-base-nli-mean-tokens"
+        ]
+
+        # 确保模型缓存目录存在
+        import os
+        cache_dir = "data/models"
+        os.makedirs(cache_dir, exist_ok=True)
+
+        for i, model_name in enumerate(model_candidates):
             try:
-                logger.info("尝试使用备用模型...")
+                logger.info(f"尝试加载嵌入模型 ({i+1}/{len(model_candidates)}): {model_name}")
+
+                # 清理可能损坏的缓存
+                await self._cleanup_model_cache(model_name, cache_dir)
+
                 from sentence_transformers import SentenceTransformer
+
+                # 使用更稳定的模型加载方式
                 self.embedding_model = SentenceTransformer(
-                    "paraphrase-MiniLM-L6-v2",
-                    cache_folder="data/models",
-                    device="cpu"
+                    model_name,
+                    cache_folder=cache_dir,
+                    device="cpu",  # 强制使用CPU
+                    trust_remote_code=False  # 安全设置
                 )
-                logger.info("备用嵌入模型加载成功")
-            except Exception as e2:
-                logger.error(f"备用模型也失败: {e2}")
-                raise
+
+                # 测试模型是否正常工作
+                test_embedding = self.embedding_model.encode("测试文本")
+                if len(test_embedding) > 0:
+                    logger.info(f"✅ 嵌入模型加载成功: {model_name}")
+                    self.config["embedding_model"] = model_name  # 更新配置
+                    return
+                else:
+                    raise Exception("模型测试失败")
+
+            except Exception as e:
+                logger.warning(f"模型 {model_name} 加载失败: {e}")
+                if i == len(model_candidates) - 1:
+                    # 所有模型都失败了，尝试使用简单的嵌入方法
+                    logger.error("所有预训练模型都失败，尝试使用简单嵌入方法")
+                    await self._initialize_simple_embedding()
+                    return
+                continue
+
+    async def _cleanup_model_cache(self, model_name: str, cache_dir: str):
+        """清理可能损坏的模型缓存"""
+        try:
+            import os
+            import shutil
+
+            # 构建模型缓存路径
+            model_cache_path = os.path.join(cache_dir, model_name.replace("/", "_"))
+
+            if os.path.exists(model_cache_path):
+                # 检查是否有损坏的文件
+                for root, dirs, files in os.walk(model_cache_path):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        try:
+                            # 检查JSON文件是否损坏
+                            if file.endswith('.json'):
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    import json
+                                    json.load(f)
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            logger.warning(f"发现损坏的缓存文件，清理: {file_path}")
+                            try:
+                                shutil.rmtree(model_cache_path)
+                                logger.info(f"已清理损坏的模型缓存: {model_cache_path}")
+                                break
+                            except:
+                                pass
+
+        except Exception as e:
+            logger.debug(f"缓存清理失败（可忽略）: {e}")
+
+    async def _initialize_simple_embedding(self):
+        """初始化简单的嵌入方法作为备选方案"""
+        try:
+            logger.info("初始化简单嵌入方法...")
+
+            # 创建一个简单的嵌入类
+            class SimpleEmbedding:
+                def encode(self, texts):
+                    """简单的文本嵌入方法"""
+                    if isinstance(texts, str):
+                        texts = [texts]
+
+                    import hashlib
+                    import numpy as np
+
+                    embeddings = []
+                    for text in texts:
+                        # 使用文本哈希和长度创建简单的嵌入向量
+                        hash_obj = hashlib.md5(text.encode('utf-8'))
+                        hash_bytes = hash_obj.digest()
+
+                        # 转换为384维向量（与MiniLM模型维度一致）
+                        embedding = np.frombuffer(hash_bytes, dtype=np.uint8)
+                        embedding = np.tile(embedding, 24)[:384]  # 重复到384维
+                        embedding = embedding.astype(np.float32) / 255.0  # 归一化
+
+                        embeddings.append(embedding)
+
+                    return np.array(embeddings) if len(embeddings) > 1 else embeddings[0]
+
+            self.embedding_model = SimpleEmbedding()
+            logger.info("✅ 简单嵌入方法初始化成功")
+
+        except Exception as e:
+            logger.error(f"简单嵌入方法初始化失败: {e}")
+            raise Exception("所有嵌入方法都失败，无法初始化记忆系统")
     
     async def add_memory(self, content: str, metadata: Dict[str, Any] = None) -> str:
         """

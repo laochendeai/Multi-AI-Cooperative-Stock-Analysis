@@ -293,21 +293,21 @@ class UpgradedTradingAgentsApp:
                 "analysis_method": "tradingagents_architecture",
                 "results": {
                     # 分析师团队结果
-                    "market_analyst": self._extract_agent_result(analyst_results, "market_analyst"),
-                    "sentiment_analyst": self._extract_agent_result(analyst_results, "social_media_analyst"),
-                    "news_analyst": self._extract_agent_result(analyst_results, "news_analyst"),
-                    "fundamentals_analyst": self._extract_agent_result(analyst_results, "fundamentals_analyst"),
+                    "market_analyst": self._extract_agent_result(analyst_results, "market_analysis"),
+                    "sentiment_analyst": self._extract_agent_result(analyst_results, "sentiment_analysis"),
+                    "news_analyst": self._extract_agent_result(analyst_results, "news_analysis"),
+                    "fundamentals_analyst": self._extract_agent_result(analyst_results, "fundamentals_analysis"),
                     
                     # 研究团队结果
-                    "bull_researcher": self._extract_agent_result(research_results, "bull_researcher"),
-                    "bear_researcher": self._extract_agent_result(research_results, "bear_researcher"),
-                    "research_manager": self._extract_agent_result(research_results, "research_manager"),
+                    "bull_researcher": self._extract_agent_result(research_results, "bull_research"),
+                    "bear_researcher": self._extract_agent_result(research_results, "bear_research"),
+                    "research_manager": self._extract_agent_result(research_results, "investment_recommendation"),
                     
                     # 交易策略
-                    "trader": self._extract_agent_result(trading_strategy, "trader"),
-                    
+                    "trader": self._extract_agent_result({"trading_strategy": trading_strategy}, "trading_strategy"),
+
                     # 风险管理
-                    "risk_manager": self._extract_agent_result(risk_assessment, "risk_manager"),
+                    "risk_manager": self._extract_agent_result(risk_assessment, "final_decision"),
                     
                     # 最终决策
                     "final_decision": final_decision
@@ -337,7 +337,7 @@ class UpgradedTradingAgentsApp:
             }
     
     def _extract_agent_result(self, results: Dict[str, Any], agent_key: str) -> Dict[str, Any]:
-        """从结果中提取特定智能体的结果 - 优化版"""
+        """从结果中提取特定智能体的结果 - 增强版"""
 
         # 检查是否已经是处理过的结果（避免递归循环）
         agent_result = results.get(agent_key, {})
@@ -395,52 +395,203 @@ class UpgradedTradingAgentsApp:
                         else:
                             logger.warning(f"从TradingGraph原始数据提取{agent_key}内容失败")
 
-        # 回退到原有逻辑
+        # 增强版回退逻辑
+        return self._extract_agent_result_enhanced(agent_result, agent_key)
 
-        if isinstance(agent_result, dict):
-            # 尝试多种可能的内容字段，按优先级顺序
-            analysis_content = None
+    def _extract_agent_result_enhanced(self, agent_data: Any, agent_key: str) -> Dict[str, Any]:
+        """增强版智能体结果提取方法"""
+        if not agent_data:
+            # 提供更有用的默认分析内容
+            default_analysis = self._get_default_analysis(agent_key)
+            return {
+                "agent_id": agent_key,
+                "analysis": default_analysis,
+                "confidence": 0.3,  # 默认分析的置信度较低
+                "timestamp": datetime.now().isoformat(),
+                "status": "default_fallback"
+            }
 
-            # 优先级1: 直接的内容字段
-            for field in ["raw_response", "content", "analysis", "response"]:
-                if field in agent_result and agent_result[field]:
-                    analysis_content = agent_result[field]
-                    break
+        # 如果有数据，尝试提取内容
+        analysis_content = ""
+        confidence = 0.5
+        timestamp = datetime.now().isoformat()
+        status = "success"
 
-            # 优先级2: 嵌套的内容字段
-            if not analysis_content:
-                if "content" in agent_result and isinstance(agent_result["content"], dict):
-                    content_dict = agent_result["content"]
-                    for field in ["raw_response", "summary", "analysis", "content"]:
-                        if field in content_dict and content_dict[field]:
-                            analysis_content = content_dict[field]
-                            break
+        try:
+            if isinstance(agent_data, dict):
+                # 检查是否是错误响应
+                if agent_data.get("status") == "error":
+                    error_msg = agent_data.get("error", "未知错误")
+                    default_analysis = self._get_default_analysis(agent_key)
+                    return {
+                        "agent_id": agent_key,
+                        "analysis": f"{default_analysis}\n\n错误信息: {error_msg}",
+                        "confidence": 0.2,
+                        "timestamp": datetime.now().isoformat(),
+                        "status": "error_fallback"
+                    }
 
-            # 优先级3: 特殊字段（如aggressive_summary等）
-            if not analysis_content:
-                for field in ["aggressive_summary", "conservative_summary", "neutral_summary", "decision_summary"]:
-                    if field in agent_result and agent_result[field]:
-                        analysis_content = agent_result[field]
-                        break
+                # 尝试提取分析内容
+                content = agent_data.get("content") or agent_data.get("analysis") or agent_data.get("result")
+                if content and isinstance(content, str) and len(content.strip()) > 10:
+                    analysis_content = content.strip()
+                    confidence = agent_data.get("confidence", 0.5)
+                    timestamp = agent_data.get("timestamp", datetime.now().isoformat())
+                    status = agent_data.get("status", "success")
+                else:
+                    # 如果没有有效内容，使用默认分析
+                    analysis_content = self._get_default_analysis(agent_key)
+                    confidence = 0.3
+                    status = "content_fallback"
 
-            # 如果仍然没有找到内容，使用默认值
-            if not analysis_content:
-                analysis_content = "分析结果不可用"
+            elif isinstance(agent_data, str) and len(agent_data.strip()) > 10:
+                analysis_content = agent_data.strip()
+                status = "success"
+            else:
+                # 其他情况使用默认分析
+                analysis_content = self._get_default_analysis(agent_key)
+                confidence = 0.3
+                status = "type_fallback"
 
             return {
                 "agent_id": agent_key,
                 "analysis": analysis_content,
-                "confidence": agent_result.get("confidence", 0.5),
-                "timestamp": agent_result.get("timestamp", datetime.now().isoformat()),
-                "status": agent_result.get("status", "success")
+                "confidence": float(confidence) if isinstance(confidence, (int, float)) else 0.5,
+                "timestamp": timestamp,
+                "status": status
             }
-        else:
+
+        except Exception as e:
+            logger.error(f"提取{agent_key}结果时发生错误: {e}")
+            default_analysis = self._get_default_analysis(agent_key)
             return {
                 "agent_id": agent_key,
-                "analysis": str(agent_result) if agent_result else "分析结果不可用",
-                "confidence": 0.5,
+                "analysis": f"{default_analysis}\n\n处理错误: {str(e)}",
+                "confidence": 0.1,
                 "timestamp": datetime.now().isoformat(),
-                "status": "success"
+                "status": "exception_fallback"
+            }
+
+    def _get_default_analysis(self, agent_key: str) -> str:
+        """获取智能体的默认分析内容"""
+        default_analyses = {
+            "market_analyst": "技术分析暂时不可用。建议关注股票的价格趋势、成交量变化和关键技术指标。",
+            "sentiment_analyst": "情感分析暂时不可用。建议关注市场整体情绪、投资者信心指数和社交媒体讨论热度。",
+            "news_analyst": "新闻分析暂时不可用。建议关注公司最新公告、行业动态和宏观经济新闻。",
+            "fundamentals_analyst": "基本面分析暂时不可用。建议关注公司财务报表、盈利能力和估值水平。",
+            "bull_researcher": "多头观点暂时不可用。建议从积极角度分析公司发展前景和市场机会。",
+            "bear_researcher": "空头观点暂时不可用。建议从谨慎角度分析潜在风险和市场挑战。",
+            "risk_manager": "风险评估暂时不可用。建议综合考虑市场风险、流动性风险和公司特定风险。"
+        }
+        return default_analyses.get(agent_key, f"{agent_key}分析暂时不可用，请稍后重试。")
+
+    def _extract_agent_result(self, results: Dict[str, Any], result_key: str) -> Dict[str, Any]:
+        """从结果中提取智能体分析结果"""
+        agent_data = results.get(result_key, {})
+        return self._extract_agent_result_enhanced(agent_data, result_key)
+
+    def _extract_agent_result_legacy(self, results: Dict[str, Any], result_key: str) -> Dict[str, Any]:
+        """原有的结果提取方法（保留作为备用）"""
+        agent_data = results.get(result_key, {})
+        analysis_content = ""
+        confidence = 0.5
+        timestamp = datetime.now().isoformat()
+        status = "success"
+
+        try:
+            if isinstance(agent_data, dict):
+                # 优先级1: 从content字段提取
+                content = agent_data.get("content")
+                if content:
+                    if isinstance(content, str) and len(content.strip()) > 10:
+                        analysis_content = content.strip()
+                    elif isinstance(content, dict):
+                        # 从content字典中提取分析内容
+                        analysis_parts = []
+
+                        # 查找分析摘要
+                        for key in ["analysis_summary", "summary", "analysis", "result"]:
+                            if key in content and isinstance(content[key], str) and len(content[key].strip()) > 10:
+                                analysis_parts.append(f"{key}: {content[key].strip()}")
+
+                        # 查找其他有用信息
+                        for key, value in content.items():
+                            if key not in ["analysis_summary", "summary", "analysis", "result"]:
+                                if isinstance(value, str) and len(value.strip()) > 5:
+                                    analysis_parts.append(f"{key}: {value.strip()}")
+                                elif isinstance(value, (int, float)):
+                                    analysis_parts.append(f"{key}: {value}")
+                                elif isinstance(value, list) and value:
+                                    analysis_parts.append(f"{key}: {', '.join(map(str, value))}")
+
+                        if analysis_parts:
+                            analysis_content = "\n".join(analysis_parts)
+
+                # 优先级2: 从raw_response提取
+                if not analysis_content:
+                    raw_response = agent_data.get("raw_response", "")
+                    if isinstance(raw_response, str) and len(raw_response.strip()) > 10:
+                        analysis_content = raw_response.strip()
+
+                # 优先级3: 从其他字段提取
+                if not analysis_content:
+                    for key in ["analysis", "result", "output", "response"]:
+                        value = agent_data.get(key)
+                        if isinstance(value, str) and len(value.strip()) > 10:
+                            analysis_content = value.strip()
+                            break
+
+                # 提取元数据
+                confidence = agent_data.get("confidence", 0.5)
+                timestamp = agent_data.get("timestamp", datetime.now().isoformat())
+
+                # 检查状态
+                agent_status = agent_data.get("status", "unknown")
+                if agent_status == "error":
+                    status = "error"
+                    error_msg = agent_data.get("error", "未知错误")
+                    analysis_content = f"分析失败: {error_msg}"
+                elif agent_status == "success" and analysis_content:
+                    status = "success"
+                else:
+                    status = "no_content"
+
+            elif isinstance(agent_data, str) and len(agent_data.strip()) > 10:
+                analysis_content = agent_data.strip()
+                status = "success"
+
+            # 如果仍然没有内容，记录详细信息
+            if not analysis_content:
+                logger.warning(f"无法从{result_key}提取有效内容")
+                logger.warning(f"数据类型: {type(agent_data)}")
+
+                if isinstance(agent_data, dict):
+                    logger.warning(f"可用键: {list(agent_data.keys())}")
+                    for k, v in agent_data.items():
+                        if isinstance(v, str):
+                            logger.warning(f"  {k}: str({len(v)}) = '{v[:50]}...'")
+                        else:
+                            logger.warning(f"  {k}: {type(v)} = {str(v)[:50]}")
+
+                analysis_content = "分析结果不可用"
+                status = "no_content"
+
+            return {
+                "agent_id": result_key,
+                "analysis": analysis_content,
+                "confidence": float(confidence) if isinstance(confidence, (int, float)) else 0.5,
+                "timestamp": timestamp,
+                "status": status
+            }
+
+        except Exception as e:
+            logger.error(f"提取{result_key}结果时发生错误: {e}")
+            return {
+                "agent_id": result_key,
+                "analysis": f"结果提取失败: {str(e)}",
+                "confidence": 0.0,
+                "timestamp": datetime.now().isoformat(),
+                "status": "error"
             }
 
     def _deep_extract_content(self, data: Any, agent_key: str, depth: int = 0) -> str:
