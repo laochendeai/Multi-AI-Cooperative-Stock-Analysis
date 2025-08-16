@@ -101,12 +101,132 @@ class FinalTradingAgentsApp:
             }
 
     def get_all_available_models_list(self) -> List[str]:
-        """获取所有可用模型的平铺列表"""
+        """获取所有可用模型的平铺列表（仅包含已配置的提供商）"""
         models_dict = self.get_available_models()
+        configured_providers = self.get_configured_providers_list()
+
         all_models = []
         for provider, models in models_dict.items():
-            all_models.extend(models)
+            # 只包含已配置LLM密钥的提供商的模型
+            if provider in configured_providers:
+                all_models.extend(models)
         return all_models
+
+    def get_configured_providers_list(self) -> List[str]:
+        """获取已配置LLM密钥的提供商列表"""
+        configured_providers = []
+        if self.enhanced_app:
+            try:
+                llm_config = self.enhanced_app.llm_config
+                for provider in llm_config.keys():
+                    if provider not in ["saved_time", "version"]:
+                        configured_providers.append(provider)
+            except Exception as e:
+                logger.error(f"获取已配置提供商失败: {e}")
+        return configured_providers
+
+    def get_models_with_features(self) -> Dict[str, Dict[str, Any]]:
+        """获取模型及其特色功能描述"""
+        models_dict = self.get_available_models()
+        configured_providers = self.get_configured_providers_list()
+
+        models_with_features = {}
+
+        # 模型特色描述
+        model_features = {
+            # DeepSeek 模型
+            "deepseek-chat": {
+                "provider": "deepseek",
+                "description": "🧠 中文对话专家 - 擅长中文理解和逻辑推理",
+                "features": ["中文对话", "逻辑推理", "知识问答"],
+                "best_for": "中文分析、逻辑推理"
+            },
+            "deepseek-coder": {
+                "provider": "deepseek",
+                "description": "💻 代码生成专家 - 专业的编程和代码分析",
+                "features": ["代码生成", "程序分析", "技术解答"],
+                "best_for": "技术分析、代码相关"
+            },
+
+            # Google 模型
+            "gemini-pro": {
+                "provider": "google",
+                "description": "🌟 多模态AI - 支持文本、图像理解和联网搜索",
+                "features": ["多模态", "联网搜索", "图像理解"],
+                "best_for": "综合分析、联网搜索"
+            },
+            "gemini-1.5-flash": {
+                "provider": "google",
+                "description": "⚡ 快速响应 - 高速处理，适合实时分析",
+                "features": ["快速响应", "联网搜索", "实时分析"],
+                "best_for": "快速分析、实时响应"
+            },
+            "gemini-1.5-pro": {
+                "provider": "google",
+                "description": "🎯 专业版本 - 更强的推理能力和准确性",
+                "features": ["深度推理", "联网搜索", "高准确性"],
+                "best_for": "深度分析、专业判断"
+            },
+
+            # Moonshot 模型
+            "moonshot-v1-8k": {
+                "provider": "moonshot",
+                "description": "🌙 长文本处理 - 8K上下文，适合文档分析",
+                "features": ["长文本", "文档分析", "上下文理解"],
+                "best_for": "文档分析、长文本处理"
+            },
+            "moonshot-v1-32k": {
+                "provider": "moonshot",
+                "description": "📚 超长文本 - 32K上下文，处理大量信息",
+                "features": ["超长文本", "大量信息", "深度理解"],
+                "best_for": "大量数据分析、深度研究"
+            },
+
+            # 阿里百炼模型
+            "qwen-turbo": {
+                "provider": "阿里百炼",
+                "description": "🔥 通义千问快速版 - 平衡速度和质量",
+                "features": ["中文优化", "联网搜索", "快速响应"],
+                "best_for": "中文分析、快速处理"
+            },
+            "qwen-plus": {
+                "provider": "阿里百炼",
+                "description": "⭐ 通义千问增强版 - 更强的推理和创作能力",
+                "features": ["强推理", "联网搜索", "创作能力"],
+                "best_for": "复杂分析、创意内容"
+            },
+
+            # Groq 模型
+            "llama3-8b-8192": {
+                "provider": "groq",
+                "description": "🚀 Llama3快速版 - 超高速推理引擎",
+                "features": ["超高速", "低延迟", "实时响应"],
+                "best_for": "实时分析、快速响应"
+            },
+            "llama3-70b-8192": {
+                "provider": "groq",
+                "description": "💪 Llama3强化版 - 更强的理解和推理能力",
+                "features": ["强推理", "高质量", "复杂任务"],
+                "best_for": "复杂分析、深度推理"
+            }
+        }
+
+        # 只包含已配置提供商的模型
+        for provider, models in models_dict.items():
+            if provider in configured_providers:
+                for model in models:
+                    if model in model_features:
+                        models_with_features[model] = model_features[model]
+                    else:
+                        # 为未定义的模型提供默认描述
+                        models_with_features[model] = {
+                            "provider": provider,
+                            "description": f"🤖 {model} - {provider}提供的AI模型",
+                            "features": ["通用AI功能"],
+                            "best_for": "通用分析任务"
+                        }
+
+        return models_with_features
 
     def update_agent_model_config(self, agent: str, model: str) -> str:
         """更新智能体模型配置"""
@@ -906,7 +1026,130 @@ app = FinalTradingAgentsApp()
 async def analyze_stock_async(symbol: str, depth: str, selected_agents: List[str],
                             agent_models: Dict[str, str] = None):
     """异步股票分析函数"""
-    return await app.analyze_stock_real(symbol, depth, selected_agents, agent_models)
+    # 更新智能体模型配置
+    if agent_models:
+        for agent, model in agent_models.items():
+            app.enhanced_app.update_agent_model_config(agent, model)
+
+    # 调用增强分析方法
+    return await app.enhanced_app.analyze_stock_enhanced(symbol, depth, selected_agents, use_real_llm=True)
+
+def format_analysis_result(result: Dict[str, Any]) -> str:
+    """格式化分析结果为可读的Markdown格式"""
+    try:
+        if not isinstance(result, dict):
+            return str(result)
+
+        # 检查结果状态
+        if result.get("status") == "failed":
+            return f"❌ **分析失败**\n\n错误信息: {result.get('error', '未知错误')}"
+
+        # 获取基本信息
+        symbol = result.get("symbol", "未知股票")
+        timestamp = result.get("timestamp", "")
+
+        # 构建格式化输出
+        output = []
+        output.append(f"# 📊 {symbol} 股票分析报告")
+        output.append(f"**分析时间**: {timestamp}")
+        output.append("")
+
+        # 获取结果数据
+        results = result.get("results", {})
+
+        # 综合报告
+        comprehensive_report = results.get("comprehensive_report", "")
+        if comprehensive_report:
+            output.append("## 📈 综合分析报告")
+            output.append(comprehensive_report)
+            output.append("")
+
+        # 市场分析
+        market_analysis = results.get("market_analysis", {})
+        if market_analysis and isinstance(market_analysis, dict):
+            analysis_content = market_analysis.get("analysis", "")
+            if analysis_content:
+                output.append("## 🏪 市场分析")
+                output.append(analysis_content)
+                output.append("")
+
+        # 情感分析
+        sentiment_analysis = results.get("sentiment_analysis", {})
+        if sentiment_analysis and isinstance(sentiment_analysis, dict):
+            analysis_content = sentiment_analysis.get("analysis", "")
+            if analysis_content:
+                output.append("## 😊 情感分析")
+                output.append(analysis_content)
+                output.append("")
+
+        # 基本面分析
+        fundamentals_analysis = results.get("fundamentals_analysis", {})
+        if fundamentals_analysis and isinstance(fundamentals_analysis, dict):
+            analysis_content = fundamentals_analysis.get("analysis", "")
+            if analysis_content:
+                output.append("## 📊 基本面分析")
+                output.append(analysis_content)
+                output.append("")
+
+        # 多头观点
+        bull_arguments = results.get("bull_arguments", {})
+        if bull_arguments and isinstance(bull_arguments, dict):
+            analysis_content = bull_arguments.get("analysis", "")
+            if analysis_content:
+                output.append("## 🐂 多头观点")
+                output.append(analysis_content)
+                output.append("")
+
+        # 空头观点
+        bear_arguments = results.get("bear_arguments", {})
+        if bear_arguments and isinstance(bear_arguments, dict):
+            analysis_content = bear_arguments.get("analysis", "")
+            if analysis_content:
+                output.append("## 🐻 空头观点")
+                output.append(analysis_content)
+                output.append("")
+
+        # 交易策略
+        trading_strategy = results.get("trading_strategy", {})
+        if trading_strategy and isinstance(trading_strategy, dict):
+            analysis_content = trading_strategy.get("analysis", "")
+            if analysis_content:
+                output.append("## 💼 交易策略")
+                output.append(analysis_content)
+                output.append("")
+
+        # 风险评估
+        risk_assessment = results.get("risk_assessment", {})
+        if risk_assessment and isinstance(risk_assessment, dict):
+            analysis_content = risk_assessment.get("analysis", "")
+            if analysis_content:
+                output.append("## ⚠️ 风险评估")
+                output.append(analysis_content)
+                output.append("")
+
+        # 最终决策
+        final_decision = results.get("final_decision", "HOLD")
+        if final_decision:
+            output.append("## 🎯 最终投资建议")
+            if isinstance(final_decision, dict):
+                decision = final_decision.get("decision", "HOLD")
+                reasoning = final_decision.get("reasoning", "")
+                output.append(f"**决策**: {decision}")
+                if reasoning:
+                    output.append(f"**理由**: {reasoning}")
+            else:
+                output.append(f"**决策**: {final_decision}")
+            output.append("")
+
+        # 如果没有任何内容，返回默认消息
+        if len(output) <= 3:
+            return f"✅ **{symbol} 分析完成**\n\n分析已完成，请查看右侧的原始数据获取详细信息。"
+
+        return "\n".join(output)
+
+    except Exception as e:
+        logger.error(f"格式化分析结果失败: {e}")
+        return f"✅ **分析完成**\n\n分析已完成，但格式化时出现问题: {str(e)}\n\n请查看右侧的原始数据获取详细信息。"
 
 def analyze_stock_sync(symbol: str, depth: str, selected_agents: List[str],
                       agent_models_json: str = "{}"):
@@ -999,37 +1242,67 @@ def create_final_ui():
                     elem_classes=["compact-input"]
                 )
 
-                # 智能体选择
-                agents_select = gr.CheckboxGroup(
-                    choices=app.get_available_agents(),
-                    value=["market_analyst", "sentiment_analyst", "news_analyst"],
-                    label="🤖 选择智能体",
-                    elem_classes=["compact-input"]
-                )
+                # 智能体模型配置（合并选择和配置功能）
+                gr.Markdown("### 🤖 智能体配置")
+                gr.Markdown("**选择参与分析的智能体并为每个智能体配置专用模型:**")
 
-                # 智能体模型配置
-                with gr.Accordion("🧠 智能体模型配置", open=True):
-                    gr.Markdown("**为每个智能体选择专用模型:**")
+                # 获取模型特色信息
+                models_with_features = app.get_models_with_features()
 
-                    # 创建每个智能体的模型选择器
-                    agent_model_selectors = {}
-                    all_models = app.get_all_available_models_list()
+                # 创建模型选择选项（包含特色描述）
+                model_choices = []
+                for model, info in models_with_features.items():
+                    choice_text = f"{model} - {info['description']}"
+                    model_choices.append((choice_text, model))
 
-                    for agent in app.get_available_agents():
-                        agent_model_selectors[agent] = gr.Dropdown(
-                            choices=all_models,
-                            value=app.agent_model_memory.get(agent, all_models[0] if all_models else ""),
-                            label=f"{agent}",
-                            elem_classes=["compact-input"]
-                        )
+                # 为每个智能体创建配置行
+                agent_configs = {}
+                available_agents = app.get_available_agents()
+
+                with gr.Column():
+                    for agent in available_agents:
+                        # 获取智能体的当前配置
+                        current_model = app.agent_model_memory.get(agent, list(models_with_features.keys())[0] if models_with_features else "")
+
+                        with gr.Row():
+                            # 智能体启用复选框
+                            agent_enabled = gr.Checkbox(
+                                label=f"🤖 {agent}",
+                                value=agent in ["market_analyst", "sentiment_analyst", "news_analyst"],
+                                scale=2
+                            )
+
+                            # 模型选择下拉框
+                            agent_model = gr.Dropdown(
+                                choices=model_choices,
+                                value=current_model,
+                                label="选择模型",
+                                interactive=True,
+                                scale=4
+                            )
+
+                            # 模型特色显示
+                            model_features_display = gr.Textbox(
+                                value=models_with_features.get(current_model, {}).get("best_for", ""),
+                                label="适用场景",
+                                interactive=False,
+                                scale=2
+                            )
+
+                        agent_configs[agent] = {
+                            "enabled": agent_enabled,
+                            "model": agent_model,
+                            "features": model_features_display
+                        }
 
                     # 保存配置按钮
-                    save_agent_config_btn = gr.Button("💾 保存智能体配置", variant="secondary")
-                    agent_config_status = gr.Textbox(
-                        label="配置状态",
-                        interactive=False,
-                        lines=2
-                    )
+                    with gr.Row():
+                        save_agent_config_btn = gr.Button("💾 保存智能体配置", variant="secondary")
+                        agent_config_status = gr.Textbox(
+                            label="配置状态",
+                            interactive=False,
+                            lines=2
+                        )
 
                 # 分析按钮
                 with gr.Row():
@@ -1241,33 +1514,57 @@ def create_final_ui():
                 refresh_btn = gr.Button("🔄 刷新状态", size="sm")
 
         # 事件绑定函数
-        def start_analysis(symbol, depth, agents, *agent_model_values):
+        def start_analysis(symbol, depth, *agent_config_values):
             """开始分析"""
             if not symbol or not symbol.strip():
                 return "❌ 请输入股票代码", "{}", "", "🔴 分析失败", 0
 
-            if not agents:
-                return "❌ 请至少选择一个智能体", "{}", "", "🔴 分析失败", 0
-
             try:
-                # 构建智能体模型配置
-                agent_models = {}
+                # 解析智能体配置（每个智能体有3个值：enabled, model, features）
                 agent_list = app.get_available_agents()
+                selected_agents = []
+                agent_models = {}
+
                 for i, agent in enumerate(agent_list):
-                    if i < len(agent_model_values):
-                        agent_models[agent] = agent_model_values[i]
+                    base_index = i * 3
+                    if base_index + 1 < len(agent_config_values):
+                        enabled = agent_config_values[base_index]  # 是否启用
+                        model = agent_config_values[base_index + 1]  # 选择的模型
+
+                        if enabled:  # 如果智能体被启用
+                            selected_agents.append(agent)
+                            agent_models[agent] = model
+
+                if not selected_agents:
+                    return "❌ 请至少选择一个智能体", "{}", "", "🔴 分析失败", 0
 
                 # 执行分析
                 models_json = json.dumps(agent_models)
-                result = analyze_stock_sync(symbol.strip(), depth, agents, models_json)
+                result = analyze_stock_sync(symbol.strip(), depth, selected_agents, models_json)
 
-                if "error" in result:
+                # 检查结果类型和错误
+                if isinstance(result, dict) and "error" in result:
                     error_msg = f"❌ 分析失败: {result['error']}"
                     return error_msg, "{}", "", "🔴 分析失败", 0
 
                 # 格式化输出
-                formatted_output = result.get('formatted_result', '无分析结果')
-                result_json = json.dumps(result, ensure_ascii=False)
+                if isinstance(result, dict):
+                    # 检查是否有格式化结果
+                    formatted_output = result.get('formatted_result', '')
+
+                    if not formatted_output:
+                        # 如果没有格式化结果，生成一个
+                        formatted_output = format_analysis_result(result)
+
+                    result_json = json.dumps(result, ensure_ascii=False)
+                elif isinstance(result, str):
+                    formatted_output = result
+                    result_json = json.dumps({"analysis_result": result}, ensure_ascii=False)
+                    result = {"analysis_result": result}
+                else:
+                    formatted_output = str(result)
+                    result_json = json.dumps({"analysis_result": str(result)}, ensure_ascii=False)
+                    result = {"analysis_result": str(result)}
 
                 return formatted_output, result, result_json, "🟢 分析完成", 100
 
@@ -1275,21 +1572,31 @@ def create_final_ui():
                 error_msg = f"❌ 分析异常: {str(e)}"
                 return error_msg, "{}", "", "🔴 分析异常", 0
 
-        def save_agent_config(*agent_model_values):
+        def save_agent_config(*agent_config_values):
             """保存智能体模型配置"""
             try:
                 agent_list = app.get_available_agents()
                 results = []
 
                 for i, agent in enumerate(agent_list):
-                    if i < len(agent_model_values):
-                        model = agent_model_values[i]
-                        result = app.update_agent_model_config(agent, model)
-                        results.append(result)
+                    base_index = i * 3
+                    if base_index + 1 < len(agent_config_values):
+                        enabled = agent_config_values[base_index]  # 是否启用
+                        model = agent_config_values[base_index + 1]  # 选择的模型
 
-                return "\n".join(results)
+                        # 保存模型配置
+                        result = app.update_agent_model_config(agent, model)
+                        status = "✅ 启用" if enabled else "⏸️ 禁用"
+                        results.append(f"{agent}: {model} ({status})")
+
+                return "💾 配置已保存:\n" + "\n".join(results)
             except Exception as e:
                 return f"❌ 保存配置失败: {str(e)}"
+
+        def update_model_features(model_name):
+            """更新模型特色显示"""
+            models_with_features = app.get_models_with_features()
+            return models_with_features.get(model_name, {}).get("best_for", "")
 
         def refresh_llm_config():
             """刷新LLM配置显示"""
@@ -1355,20 +1662,45 @@ def create_final_ui():
             """
 
         # 绑定事件
-        # 分析事件 - 使用智能体模型选择器的值
-        agent_model_inputs = [stock_input, depth_select, agents_select] + list(agent_model_selectors.values())
+        # 分析事件 - 使用智能体配置的值
+        agent_config_inputs = [stock_input, depth_select]
+
+        # 添加所有智能体配置输入（每个智能体3个输入：enabled, model, features）
+        for agent in available_agents:
+            agent_config_inputs.extend([
+                agent_configs[agent]["enabled"],
+                agent_configs[agent]["model"],
+                agent_configs[agent]["features"]
+            ])
+
         analyze_btn.click(
             fn=start_analysis,
-            inputs=agent_model_inputs,
+            inputs=agent_config_inputs,
             outputs=[analysis_output, raw_data_output, result_storage, current_status, analysis_progress]
         )
 
         # 保存智能体配置事件
+        save_config_inputs = []
+        for agent in available_agents:
+            save_config_inputs.extend([
+                agent_configs[agent]["enabled"],
+                agent_configs[agent]["model"],
+                agent_configs[agent]["features"]
+            ])
+
         save_agent_config_btn.click(
             fn=save_agent_config,
-            inputs=list(agent_model_selectors.values()),
+            inputs=save_config_inputs,
             outputs=[agent_config_status]
         )
+
+        # 模型选择变化时更新特色显示
+        for agent in available_agents:
+            agent_configs[agent]["model"].change(
+                fn=update_model_features,
+                inputs=[agent_configs[agent]["model"]],
+                outputs=[agent_configs[agent]["features"]]
+            )
 
         export_btn.click(
             fn=export_result_sync,

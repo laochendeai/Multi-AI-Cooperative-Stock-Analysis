@@ -1285,7 +1285,55 @@ class EnhancedTradingAgentsApp:
                 "status": "error",
                 "message": f"连接测试失败: {str(e)}"
             }
-    
+
+    def update_agent_model_config(self, agent: str, model: str) -> str:
+        """更新智能体模型配置"""
+        try:
+            # 解析模型配置（格式：provider:model 或 model）
+            if ":" in model:
+                provider, model_name = model.split(":", 1)
+                full_config = f"{provider}:{model_name}"
+            else:
+                # 如果只有模型名，需要找到对应的提供商
+                models_dict = self.get_available_models()
+                provider = None
+                for prov, models in models_dict.items():
+                    if model in models:
+                        provider = prov
+                        break
+
+                if provider:
+                    full_config = f"{provider}:{model}"
+                else:
+                    return f"❌ 未找到模型 {model} 的提供商"
+
+            # 更新配置
+            self.agent_model_config[agent] = full_config
+
+            # 保存到文件
+            self._save_agent_model_config()
+
+            logger.info(f"✅ 更新智能体 {agent} 模型配置: {full_config}")
+            return f"✅ {agent} -> {full_config}"
+
+        except Exception as e:
+            error_msg = f"❌ 更新 {agent} 配置失败: {str(e)}"
+            logger.error(error_msg)
+            return error_msg
+
+    def _save_agent_model_config(self):
+        """保存智能体模型配置到文件"""
+        try:
+            config_file = Path("config/agent_model_config.json")
+            config_file.parent.mkdir(exist_ok=True)
+
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.agent_model_config, f, ensure_ascii=False, indent=2)
+
+            logger.info("智能体模型配置已保存")
+        except Exception as e:
+            logger.error(f"保存智能体模型配置失败: {e}")
+
     async def analyze_stock_enhanced(self, symbol: str, depth: str, analysts: List[str],
                                    use_real_llm: bool = False) -> Dict[str, Any]:
         """增强的股票分析 - 真正的15个智能体协作"""
@@ -2835,6 +2883,18 @@ class EnhancedTradingAgentsApp:
         score = 0.5
 
         for word in bullish_words:
+            if word in text:
+                score += 0.1
+
+        return min(score, 1.0)
+
+    def _extract_bearish_score(self, text: str) -> float:
+        """提取看跌评分"""
+        # 简单的看跌评分逻辑
+        bearish_words = ["强烈看跌", "看跌", "下跌", "卖出", "风险", "高估", "泡沫"]
+        score = 0.5
+
+        for word in bearish_words:
             if word in text:
                 score += 0.1
 
