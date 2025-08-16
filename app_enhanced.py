@@ -1291,7 +1291,7 @@ class EnhancedTradingAgentsApp:
         try:
             # 解析模型配置（格式：provider:model 或 model）
             if ":" in model:
-                provider, model_name = model.split(":", 1)
+                provider, model_name = self._parse_model_config(model)
                 full_config = f"{provider}:{model_name}"
             else:
                 # 如果只有模型名，需要找到对应的提供商
@@ -1824,11 +1824,19 @@ class EnhancedTradingAgentsApp:
             logger.error(f"数据收集失败: {e}")
             return {"error": f"数据收集失败: {str(e)}"}
 
+    def _parse_model_config(self, model_config: str) -> tuple:
+        """安全解析模型配置"""
+        if ":" in model_config:
+            return model_config.split(":", 1)
+        else:
+            # 如果没有提供商前缀，使用默认提供商
+            return "阿里百炼", model_config
+
     async def _check_llm_internet_access(self, agent_id: str) -> bool:
         """检查智能体使用的LLM是否支持联网"""
         try:
             model_config = self.agent_model_config.get(agent_id, "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             if provider not in self.llm_config:
                 return False
@@ -1907,7 +1915,7 @@ class EnhancedTradingAgentsApp:
         try:
             # 获取配置的模型
             model_config = self.agent_model_config.get("market_analyst", "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             # 获取股票名称，使用回退机制
             raw_name = stock_data.get('name', '')
@@ -1956,7 +1964,7 @@ class EnhancedTradingAgentsApp:
         """调用情感分析师 - 使用真实社交媒体数据"""
         try:
             model_config = self.agent_model_config.get("social_media_analyst", "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             # 检查LLM是否支持联网搜索
             has_internet = await self._check_llm_internet_access("social_media_analyst")
@@ -2021,7 +2029,7 @@ class EnhancedTradingAgentsApp:
         """调用新闻分析师 - 使用真实新闻数据"""
         try:
             model_config = self.agent_model_config.get("news_analyst", "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             # 检查LLM是否支持联网搜索
             has_internet = await self._check_llm_internet_access("news_analyst")
@@ -2086,7 +2094,7 @@ class EnhancedTradingAgentsApp:
         """调用基本面分析师 - 使用真实财务数据"""
         try:
             model_config = self.agent_model_config.get("fundamentals_analyst", "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             # 检查LLM是否支持联网搜索
             has_internet = await self._check_llm_internet_access("fundamentals_analyst")
@@ -2216,7 +2224,7 @@ class EnhancedTradingAgentsApp:
         """调用多头研究员（带上下文辩论）"""
         try:
             model_config = self.agent_model_config.get("bull_researcher", "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             # 汇总分析师观点
             market_view = analyst_results.get("market_analyst", {}).get("analysis", "")
@@ -2285,7 +2293,7 @@ class EnhancedTradingAgentsApp:
         """调用空头研究员（带上下文辩论）"""
         try:
             model_config = self.agent_model_config.get("bear_researcher", "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             # 汇总分析师观点
             market_view = analyst_results.get("market_analyst", {}).get("analysis", "")
@@ -2354,7 +2362,7 @@ class EnhancedTradingAgentsApp:
         """调用研究经理（带辩论历史）"""
         try:
             model_config = self.agent_model_config.get("research_manager", "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             # 使用数据收集器的股票名称获取方法
             stock_name = self.data_collector.get_stock_name(symbol)
@@ -2425,7 +2433,7 @@ class EnhancedTradingAgentsApp:
         """调用多头研究员"""
         try:
             model_config = self.agent_model_config.get("bull_researcher", "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             # 汇总分析师观点
             market_view = analyst_results.get("market_analyst", {}).get("analysis", "")
@@ -2906,7 +2914,7 @@ class EnhancedTradingAgentsApp:
         """运行交易员分析"""
         try:
             model_config = self.agent_model_config.get("trader", "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             # 汇总研究团队观点
             bull_view = research_results.get("bull_researcher", {}).get("analysis", "")
@@ -2969,7 +2977,7 @@ class EnhancedTradingAgentsApp:
 
             # 使用风险经理的模型进行最终决策
             model_config = self.agent_model_config.get("risk_manager", "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             prompt = f"""
 作为最终决策者，请基于风险管理团队的评估，对股票 {symbol} 做出最终投资决策。
@@ -3002,7 +3010,7 @@ class EnhancedTradingAgentsApp:
         """运行反思引擎"""
         try:
             model_config = self.agent_model_config.get("reflection_engine", "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             decision_reasoning = final_decision.get("reasoning", "")
 
@@ -3080,7 +3088,7 @@ class EnhancedTradingAgentsApp:
         """调用空头研究员"""
         try:
             model_config = self.agent_model_config.get("bear_researcher", "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             # 汇总分析师观点
             market_view = analyst_results.get("market_analyst", {}).get("analysis", "")
@@ -3129,7 +3137,7 @@ class EnhancedTradingAgentsApp:
         """调用研究经理"""
         try:
             model_config = self.agent_model_config.get("research_manager", "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             bull_view = research_results.get("bull_researcher", {}).get("analysis", "")
             bear_view = research_results.get("bear_researcher", {}).get("analysis", "")
@@ -3173,7 +3181,7 @@ class EnhancedTradingAgentsApp:
         """调用激进分析师"""
         try:
             model_config = self.agent_model_config.get("aggressive_debator", "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             strategy = trading_strategy.get("strategy", "")
 
@@ -3209,7 +3217,7 @@ class EnhancedTradingAgentsApp:
         """调用保守分析师"""
         try:
             model_config = self.agent_model_config.get("conservative_debator", "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             strategy = trading_strategy.get("strategy", "")
 
@@ -3245,7 +3253,7 @@ class EnhancedTradingAgentsApp:
         """调用中性分析师"""
         try:
             model_config = self.agent_model_config.get("neutral_debator", "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             strategy = trading_strategy.get("strategy", "")
 
@@ -3281,7 +3289,7 @@ class EnhancedTradingAgentsApp:
         """调用风险经理"""
         try:
             model_config = self.agent_model_config.get("risk_manager", "deepseek:deepseek-chat")
-            provider, model = model_config.split(":", 1)
+            provider, model = self._parse_model_config(model_config)
 
             aggressive_view = risk_debates.get("aggressive_debator", {}).get("analysis", "")
             conservative_view = risk_debates.get("conservative_debator", {}).get("analysis", "")

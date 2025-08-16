@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-TradingAgents 最终集成应用
+TradingAgents 多AI协作股票分析平台
 基于真实tradingagents架构的完整模块化程序
 实现所有要求的功能
 """
@@ -60,6 +60,11 @@ class FinalTradingAgentsApp:
         self.agent_model_config_file = Path("config/agent_model_config.json")
         self.agent_model_memory = self._load_agent_model_config()
 
+        # 同步配置到enhanced_app
+        if self.enhanced_app:
+            self.enhanced_app.agent_model_config.update(self.agent_model_memory)
+            logger.info("🔄 配置已同步到增强版应用")
+
         logger.info(f"✅ 智能体模型配置已加载: {len(self.agent_model_memory)}个智能体")
 
         logger.info("✅ 最终TradingAgents应用初始化完成")
@@ -67,42 +72,73 @@ class FinalTradingAgentsApp:
     def _load_agent_model_config(self) -> Dict[str, str]:
         """加载智能体模型配置"""
         try:
+            available_agents = self.get_available_agents()
+
             if self.agent_model_config_file.exists():
                 with open(self.agent_model_config_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
-                logger.info(f"📂 从文件加载智能体配置: {len(config)}个智能体")
-                return config
+
+                # 过滤配置，只保留程序中定义的智能体
+                filtered_config = {}
+                for agent in available_agents:
+                    if agent in config:
+                        # 确保配置是完整格式（provider:model）
+                        model_config = config[agent]
+                        if ":" not in model_config:
+                            model_config = self._build_full_model_config(model_config)
+                        filtered_config[agent] = model_config
+                    else:
+                        # 为缺失的智能体设置默认模型
+                        filtered_config[agent] = self._get_default_model_for_agent(agent)
+
+                # 如果配置被过滤了，重新保存
+                if len(filtered_config) != len(config):
+                    logger.info(f"📂 配置文件包含额外智能体，已过滤: {len(config)} -> {len(filtered_config)}")
+                    self._save_agent_model_config(filtered_config)
+
+                logger.info(f"📂 从文件加载智能体配置: {len(filtered_config)}个智能体")
+                return filtered_config
             else:
                 # 如果配置文件不存在，使用默认配置
-                default_config = {
-                    "market_analyst": "deepseek-chat",
-                    "sentiment_analyst": "deepseek-chat",
-                    "news_analyst": "gemini-pro",
-                    "fundamentals_analyst": "qwen-turbo",
-                    "bull_researcher": "moonshot-v1-32k",
-                    "bear_researcher": "moonshot-v1-32k",
-                    "research_manager": "moonshot-v1-32k",
-                    "trader": "moonshot-v1-8k",
-                    "risk_manager": "moonshot-v1-8k"
-                }
-                logger.info("📂 使用默认智能体配置")
+                default_config = {}
+                for agent in available_agents:
+                    default_config[agent] = self._get_default_model_for_agent(agent)
+
+                logger.info(f"📂 使用默认智能体配置: {len(default_config)}个智能体")
                 # 保存默认配置到文件
                 self._save_agent_model_config(default_config)
                 return default_config
         except Exception as e:
             logger.error(f"❌ 加载智能体配置失败: {e}")
             # 返回默认配置
-            return {
-                "market_analyst": "deepseek-chat",
-                "sentiment_analyst": "deepseek-chat",
-                "news_analyst": "gemini-pro",
-                "fundamentals_analyst": "qwen-turbo",
-                "bull_researcher": "moonshot-v1-32k",
-                "bear_researcher": "moonshot-v1-32k",
-                "research_manager": "moonshot-v1-32k",
-                "trader": "moonshot-v1-8k",
-                "risk_manager": "moonshot-v1-8k"
-            }
+            available_agents = self.get_available_agents()
+            default_config = {}
+            for agent in available_agents:
+                default_config[agent] = self._get_default_model_for_agent(agent)
+            return default_config
+
+    def _get_default_model_for_agent(self, agent: str) -> str:
+        """为智能体获取默认模型"""
+        # 根据智能体类型选择合适的默认模型
+        default_models = {
+            "market_analyst": "阿里百炼:qwen-turbo",
+            "sentiment_analyst": "阿里百炼:qwen-turbo",
+            "social_media_analyst": "阿里百炼:qwen-turbo",
+            "news_analyst": "阿里百炼:qwen-turbo",
+            "fundamentals_analyst": "阿里百炼:qwen-turbo",
+            "bull_researcher": "阿里百炼:qwen-turbo",
+            "bear_researcher": "阿里百炼:qwen-turbo",
+            "research_manager": "阿里百炼:qwen-turbo",
+            "trader": "阿里百炼:qwen-turbo",
+            "aggressive_debator": "阿里百炼:qwen-turbo",
+            "conservative_debator": "阿里百炼:qwen-turbo",
+            "neutral_debator": "阿里百炼:qwen-turbo",
+            "risk_manager": "阿里百炼:qwen-turbo",
+            "memory_manager": "阿里百炼:qwen-turbo",
+            "signal_processor": "阿里百炼:qwen-turbo",
+            "reflection_engine": "阿里百炼:qwen-turbo"
+        }
+        return default_models.get(agent, "阿里百炼:qwen-turbo")
 
     def _save_agent_model_config(self, config: Dict[str, str] = None):
         """保存智能体模型配置到文件"""
@@ -112,6 +148,10 @@ class FinalTradingAgentsApp:
 
             # 使用传入的配置或当前配置
             config_to_save = config or self.agent_model_memory
+
+            # 同步到enhanced_app
+            if hasattr(self, 'enhanced_app') and self.enhanced_app:
+                self.enhanced_app.agent_model_config.update(config_to_save)
 
             with open(self.agent_model_config_file, 'w', encoding='utf-8') as f:
                 json.dump(config_to_save, f, ensure_ascii=False, indent=2)
@@ -125,13 +165,20 @@ class FinalTradingAgentsApp:
         return [
             "market_analyst",      # 市场技术分析师
             "sentiment_analyst",   # 情感分析师
+            "social_media_analyst", # 社交媒体分析师
             "news_analyst",        # 新闻分析师
             "fundamentals_analyst", # 基本面分析师
             "bull_researcher",     # 多头研究员
             "bear_researcher",     # 空头研究员
             "research_manager",    # 研究经理
             "trader",             # 交易员
-            "risk_manager"        # 风险管理师
+            "aggressive_debator",  # 激进分析师
+            "conservative_debator", # 保守分析师
+            "neutral_debator",     # 中性分析师
+            "risk_manager",        # 风险管理师
+            "memory_manager",      # 记忆管理器
+            "signal_processor",    # 信号处理器
+            "reflection_engine"    # 反思引擎
         ]
     
     def get_analysis_depths(self) -> List[str]:
@@ -287,17 +334,38 @@ class FinalTradingAgentsApp:
             if model not in all_models:
                 return f"❌ 无效的模型: {model}"
 
+            # 构建完整的模型配置（provider:model格式）
+            full_model_config = self._build_full_model_config(model)
+
             # 更新内存中的配置
-            self.agent_model_memory[agent] = model
+            self.agent_model_memory[agent] = full_model_config
+
+            # 同时更新enhanced_app的配置
+            if hasattr(self, 'enhanced_app') and self.enhanced_app:
+                self.enhanced_app.agent_model_config[agent] = full_model_config
 
             # 立即保存到文件
             self._save_agent_model_config()
 
-            logger.info(f"✅ 智能体 {agent} 模型配置已更新并保存: {model}")
-            return f"✅ 已更新 {agent} 的模型为: {model}"
+            logger.info(f"✅ 智能体 {agent} 模型配置已更新并保存: {full_model_config}")
+            return f"✅ 已更新 {agent} 的模型为: {full_model_config}"
         except Exception as e:
             logger.error(f"❌ 更新智能体配置失败: {e}")
             return f"❌ 更新失败: {str(e)}"
+
+    def _build_full_model_config(self, model: str) -> str:
+        """构建完整的模型配置（provider:model格式）"""
+        if ":" in model:
+            return model  # 已经是完整格式
+
+        # 根据模型名称找到对应的提供商
+        models_dict = self.get_available_models()
+        for provider, provider_models in models_dict.items():
+            if model in provider_models:
+                return f"{provider}:{model}"
+
+        # 如果找不到，使用默认提供商
+        return f"阿里百炼:{model}"
 
     def get_agent_model_config(self) -> Dict[str, str]:
         """获取当前智能体模型配置"""
@@ -1399,14 +1467,14 @@ def create_final_ui():
     """
 
     with gr.Blocks(
-        title="TradingAgents - 完整集成平台",
+        title="TradingAgents - 多AI协作股票分析平台",
         css=custom_css,
         theme=gr.themes.Soft()
     ) as interface:
 
         # 页面标题
         gr.Markdown("""
-        # 🤖 TradingAgents 完整集成平台
+        # 🤖 TradingAgents 多AI协作股票分析平台
         ### 基于真实tradingagents架构的模块化股票分析系统
         #### ✨ 支持自定义LLM、智能体模型选择、多格式导出
         """)
@@ -1452,7 +1520,21 @@ def create_final_ui():
                 with gr.Column():
                     for agent in available_agents:
                         # 获取智能体的当前配置
-                        current_model = app.agent_model_memory.get(agent, list(models_with_features.keys())[0] if models_with_features else "")
+                        saved_config = app.agent_model_memory.get(agent, "")
+
+                        # 解析配置格式（可能是 "provider:model" 或 "model"）
+                        if ":" in saved_config:
+                            # 格式是 "provider:model"，提取模型名称
+                            current_model = saved_config.split(":", 1)[1]
+                        else:
+                            # 格式是纯模型名称
+                            current_model = saved_config
+
+                        # 确保当前模型在可用模型列表中
+                        if current_model not in models_with_features:
+                            current_model = list(models_with_features.keys())[0] if models_with_features else ""
+
+                        logger.info(f"🤖 初始化智能体 {agent} 配置: {saved_config} -> {current_model}")
 
                         with gr.Row():
                             # 智能体启用复选框
@@ -1465,7 +1547,7 @@ def create_final_ui():
                             # 模型选择下拉框
                             agent_model = gr.Dropdown(
                                 choices=model_choices,
-                                value=current_model,
+                                value=current_model,  # 使用解析后的模型名称
                                 label="选择模型",
                                 interactive=True,
                                 scale=4
@@ -1675,10 +1757,11 @@ def create_final_ui():
                 **🎯 您的支持将用于：**
                 - 🔧 功能改进和新特性开发
                 - 🚀 性能优化和Bug修复
-                - 📚 文档完善和用户支持
+                - 📚 完成作者给妈妈尽点孝心的心愿
 
                 **🤝 其他支持方式：**
                 - ⭐ [GitHub Star](https://github.com/laochendeai/Multi-AI-Cooperative-Stock-Analysis)
+                - ⭐ [Gitee Star](https://gitee.com/laochendeai/Multi-AI-Cooperative-Stock-Analysis)
                 - 🐛 问题反馈和功能建议
                 - 📢 推荐分享给朋友
 
@@ -1977,7 +2060,7 @@ def create_final_ui():
 
 if __name__ == "__main__":
     # 创建并启动界面
-    print("🚀 启动TradingAgents完整集成平台...")
+    print("🚀 启动TradingAgents多AI协作股票分析平台...")
     interface = create_final_ui()
     interface.launch(
         server_name="0.0.0.0",

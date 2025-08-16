@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-TradingAgents 工作版集成应用
+TradingAgents 多AI协作股票分析平台
 基于真实tradingagents架构的完整模块化程序
 实现所有要求的功能
 """
@@ -631,7 +631,7 @@ def create_working_ui():
 
 if __name__ == "__main__":
     # 创建并启动界面
-    print("🚀 启动TradingAgents完整集成平台...")
+    print("🚀 启动TradingAgents多AI协作股票分析平台...")
     interface = create_working_ui()
     print("🌐 正在启动服务器...")
     interface.launch(
