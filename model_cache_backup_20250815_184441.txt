@@ -1,9 +1,0 @@
-TradingAgents 模型缓存备份
-备份时间: 2025-08-15 18:44:41.383773
-==================================================
-
-缓存目录: D:\Multi-AI-Cooperative-Stock-Analysis\data\models
-  - .locks (0.0 MB)
-  - models--sentence-transformers--all-MiniLM-L6-v2 (87.4 MB)
-  - models--sentence-transformers--paraphrase-MiniLM-L6-v2 (174.7 MB)
-
