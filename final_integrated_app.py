@@ -57,20 +57,69 @@ class FinalTradingAgentsApp:
         self.custom_providers = {}
 
         # 智能体模型配置记忆
-        self.agent_model_memory = {
-            "market_analyst": "gpt-4",
-            "sentiment_analyst": "deepseek-chat",
-            "news_analyst": "gemini-pro",
-            "fundamentals_analyst": "gpt-4",
-            "bull_researcher": "deepseek-chat",
-            "bear_researcher": "deepseek-chat",
-            "research_manager": "gpt-4",
-            "trader": "gpt-3.5-turbo",
-            "risk_manager": "gpt-4"
-        }
+        self.agent_model_config_file = Path("config/agent_model_config.json")
+        self.agent_model_memory = self._load_agent_model_config()
+
+        logger.info(f"✅ 智能体模型配置已加载: {len(self.agent_model_memory)}个智能体")
 
         logger.info("✅ 最终TradingAgents应用初始化完成")
-    
+
+    def _load_agent_model_config(self) -> Dict[str, str]:
+        """加载智能体模型配置"""
+        try:
+            if self.agent_model_config_file.exists():
+                with open(self.agent_model_config_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                logger.info(f"📂 从文件加载智能体配置: {len(config)}个智能体")
+                return config
+            else:
+                # 如果配置文件不存在，使用默认配置
+                default_config = {
+                    "market_analyst": "deepseek-chat",
+                    "sentiment_analyst": "deepseek-chat",
+                    "news_analyst": "gemini-pro",
+                    "fundamentals_analyst": "qwen-turbo",
+                    "bull_researcher": "moonshot-v1-32k",
+                    "bear_researcher": "moonshot-v1-32k",
+                    "research_manager": "moonshot-v1-32k",
+                    "trader": "moonshot-v1-8k",
+                    "risk_manager": "moonshot-v1-8k"
+                }
+                logger.info("📂 使用默认智能体配置")
+                # 保存默认配置到文件
+                self._save_agent_model_config(default_config)
+                return default_config
+        except Exception as e:
+            logger.error(f"❌ 加载智能体配置失败: {e}")
+            # 返回默认配置
+            return {
+                "market_analyst": "deepseek-chat",
+                "sentiment_analyst": "deepseek-chat",
+                "news_analyst": "gemini-pro",
+                "fundamentals_analyst": "qwen-turbo",
+                "bull_researcher": "moonshot-v1-32k",
+                "bear_researcher": "moonshot-v1-32k",
+                "research_manager": "moonshot-v1-32k",
+                "trader": "moonshot-v1-8k",
+                "risk_manager": "moonshot-v1-8k"
+            }
+
+    def _save_agent_model_config(self, config: Dict[str, str] = None):
+        """保存智能体模型配置到文件"""
+        try:
+            # 确保配置目录存在
+            self.agent_model_config_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # 使用传入的配置或当前配置
+            config_to_save = config or self.agent_model_memory
+
+            with open(self.agent_model_config_file, 'w', encoding='utf-8') as f:
+                json.dump(config_to_save, f, ensure_ascii=False, indent=2)
+
+            logger.info(f"💾 智能体配置已保存到: {self.agent_model_config_file}")
+        except Exception as e:
+            logger.error(f"❌ 保存智能体配置失败: {e}")
+
     def get_available_agents(self) -> List[str]:
         """获取可用的智能体列表"""
         return [
@@ -238,9 +287,16 @@ class FinalTradingAgentsApp:
             if model not in all_models:
                 return f"❌ 无效的模型: {model}"
 
+            # 更新内存中的配置
             self.agent_model_memory[agent] = model
+
+            # 立即保存到文件
+            self._save_agent_model_config()
+
+            logger.info(f"✅ 智能体 {agent} 模型配置已更新并保存: {model}")
             return f"✅ 已更新 {agent} 的模型为: {model}"
         except Exception as e:
+            logger.error(f"❌ 更新智能体配置失败: {e}")
             return f"❌ 更新失败: {str(e)}"
 
     def get_agent_model_config(self) -> Dict[str, str]:
@@ -955,68 +1011,202 @@ class FinalTradingAgentsApp:
     
     def _format_as_markdown(self, result: Dict[str, Any]) -> str:
         """格式化为Markdown"""
-        md_content = f"""# 📊 股票分析报告
+        # 获取基本信息
+        symbol = result.get('symbol', 'N/A')
+        timestamp = result.get('timestamp', 'N/A')
+        status = result.get('status', 'unknown')
+
+        md_content = f"""# 📊 {symbol} 股票分析报告
 
 ## 📋 基本信息
-- **股票代码**: {result.get('symbol', 'N/A')}
+- **股票代码**: {symbol}
+- **分析时间**: {timestamp}
+- **分析状态**: {status}
 - **分析深度**: {result.get('analysis_depth', 'N/A')}
-- **分析时间**: {result.get('timestamp', 'N/A')}
 - **选择的智能体**: {', '.join(result.get('selected_agents', []))}
-- **使用的模型**: {json.dumps(result.get('agent_models', {}), ensure_ascii=False)}
 
-## 📈 分析结果
-{result.get('formatted_result', '无分析结果')}
-
-## 📝 分析总结
-{result.get('summary', '无总结')}
-
-## 💡 投资建议
 """
-        
-        for rec in result.get('recommendations', []):
-            md_content += f"- {rec}\n"
-        
-        md_content += f"""
----
-*本报告由 TradingAgents 真实架构生成*
+
+        # 获取详细分析结果
+        results = result.get('results', {})
+
+        # 综合报告
+        comprehensive_report = results.get('comprehensive_report', '')
+        if comprehensive_report:
+            md_content += f"""## 📈 综合分析报告
+{comprehensive_report}
+
+"""
+
+        # 各个智能体的分析结果
+        analysis_sections = [
+            ('market_analysis', '🏪 市场分析'),
+            ('sentiment_analysis', '😊 情感分析'),
+            ('fundamentals_analysis', '📊 基本面分析'),
+            ('news_analysis', '📰 新闻分析'),
+            ('bull_arguments', '🐂 多头观点'),
+            ('bear_arguments', '🐻 空头观点'),
+            ('trading_strategy', '💼 交易策略'),
+            ('risk_assessment', '⚠️ 风险评估')
+        ]
+
+        for key, title in analysis_sections:
+            analysis_data = results.get(key, {})
+            if analysis_data and isinstance(analysis_data, dict):
+                analysis_content = analysis_data.get('analysis', '')
+                if analysis_content:
+                    md_content += f"""## {title}
+{analysis_content}
+
+"""
+
+        # 最终决策
+        final_decision = results.get('final_decision', {})
+        if final_decision:
+            md_content += "## 🎯 最终投资建议\n"
+            if isinstance(final_decision, dict):
+                decision = final_decision.get('decision', 'HOLD')
+                reasoning = final_decision.get('reasoning', '')
+                confidence = final_decision.get('confidence', 0)
+
+                md_content += f"- **投资决策**: {decision}\n"
+                md_content += f"- **置信度**: {confidence}%\n"
+                if reasoning:
+                    md_content += f"- **决策理由**: {reasoning}\n"
+            else:
+                md_content += f"- **投资决策**: {final_decision}\n"
+            md_content += "\n"
+
+        # 分析流程信息
+        analysis_flow = result.get('analysis_flow', {})
+        if analysis_flow:
+            md_content += "## � 分析流程\n"
+            for stage, info in analysis_flow.items():
+                if isinstance(info, dict):
+                    status = info.get('status', 'unknown')
+                    duration = info.get('duration', 0)
+                    md_content += f"- **{stage}**: {status} ({duration:.2f}s)\n"
+            md_content += "\n"
+
+        # 使用的模型配置
+        agent_models = result.get('agent_models', {})
+        if agent_models:
+            md_content += "## 🤖 智能体模型配置\n"
+            for agent, model in agent_models.items():
+                md_content += f"- **{agent}**: {model}\n"
+            md_content += "\n"
+
+        md_content += f"""---
+*本报告由 TradingAgents 多智能体协作系统生成*
 *生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*
+*分析引擎: Enhanced TradingAgents v2.0*
 """
-        
+
         return md_content
     
     def _format_as_text(self, result: Dict[str, Any]) -> str:
         """格式化为纯文本"""
+        # 获取基本信息
+        symbol = result.get('symbol', 'N/A')
+        timestamp = result.get('timestamp', 'N/A')
+        status = result.get('status', 'unknown')
+
         text_content = f"""TradingAgents 股票分析报告
-{'='*50}
+{'='*60}
 
 基本信息:
-股票代码: {result.get('symbol', 'N/A')}
+股票代码: {symbol}
+分析时间: {timestamp}
+分析状态: {status}
 分析深度: {result.get('analysis_depth', 'N/A')}
-分析时间: {result.get('timestamp', 'N/A')}
 选择的智能体: {', '.join(result.get('selected_agents', []))}
-使用的模型: {json.dumps(result.get('agent_models', {}), ensure_ascii=False)}
 
-分析结果:
-{'-'*30}
-{result.get('formatted_result', '无分析结果')}
-
-分析总结:
-{'-'*30}
-{result.get('summary', '无总结')}
-
-投资建议:
-{'-'*30}
 """
-        
-        for i, rec in enumerate(result.get('recommendations', []), 1):
-            text_content += f"{i}. {rec}\n"
-        
-        text_content += f"""
-{'='*50}
-本报告由 TradingAgents 真实架构生成
+
+        # 获取详细分析结果
+        results = result.get('results', {})
+
+        # 综合报告
+        comprehensive_report = results.get('comprehensive_report', '')
+        if comprehensive_report:
+            text_content += f"""综合分析报告:
+{'-'*40}
+{comprehensive_report}
+
+"""
+
+        # 各个智能体的分析结果
+        analysis_sections = [
+            ('market_analysis', '市场分析'),
+            ('sentiment_analysis', '情感分析'),
+            ('fundamentals_analysis', '基本面分析'),
+            ('news_analysis', '新闻分析'),
+            ('bull_arguments', '多头观点'),
+            ('bear_arguments', '空头观点'),
+            ('trading_strategy', '交易策略'),
+            ('risk_assessment', '风险评估')
+        ]
+
+        for key, title in analysis_sections:
+            analysis_data = results.get(key, {})
+            if analysis_data and isinstance(analysis_data, dict):
+                analysis_content = analysis_data.get('analysis', '')
+                if analysis_content:
+                    text_content += f"""{title}:
+{'-'*40}
+{analysis_content}
+
+"""
+
+        # 最终决策
+        final_decision = results.get('final_decision', {})
+        if final_decision:
+            text_content += f"""最终投资建议:
+{'-'*40}
+"""
+            if isinstance(final_decision, dict):
+                decision = final_decision.get('decision', 'HOLD')
+                reasoning = final_decision.get('reasoning', '')
+                confidence = final_decision.get('confidence', 0)
+
+                text_content += f"投资决策: {decision}\n"
+                text_content += f"置信度: {confidence}%\n"
+                if reasoning:
+                    text_content += f"决策理由: {reasoning}\n"
+            else:
+                text_content += f"投资决策: {final_decision}\n"
+            text_content += "\n"
+
+        # 分析流程信息
+        analysis_flow = result.get('analysis_flow', {})
+        if analysis_flow:
+            text_content += f"""分析流程:
+{'-'*40}
+"""
+            for stage, info in analysis_flow.items():
+                if isinstance(info, dict):
+                    status = info.get('status', 'unknown')
+                    duration = info.get('duration', 0)
+                    text_content += f"{stage}: {status} ({duration:.2f}s)\n"
+            text_content += "\n"
+
+        # 使用的模型配置
+        agent_models = result.get('agent_models', {})
+        if agent_models:
+            text_content += f"""智能体模型配置:
+{'-'*40}
+"""
+            for agent, model in agent_models.items():
+                text_content += f"{agent}: {model}\n"
+            text_content += "\n"
+
+        text_content += f"""{'='*60}
+本报告由 TradingAgents 多智能体协作系统生成
 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+分析引擎: Enhanced TradingAgents v2.0
+{'='*60}
 """
-        
+
         return text_content
 
 # 创建全局应用实例
@@ -1463,6 +1653,40 @@ def create_final_ui():
 
             # 右侧状态面板
             with gr.Column(scale=15, elem_classes=["analysis-card"]):
+                # 赞赏卡片
+                gr.Markdown("### 💝 支持开发")
+                gr.Markdown("""
+                **🌟 感谢您使用 TradingAgents！**
+
+                如果这个项目对您有帮助，欢迎支持开发者：
+                """)
+
+                # 赞赏码图片
+                gr.Image(
+                    value="./assets/donation_code.png",
+                    label="赞赏码",
+                    show_label=False,
+                    container=False,
+                    height=200,
+                    width=200
+                )
+
+                gr.Markdown("""
+                **🎯 您的支持将用于：**
+                - 🔧 功能改进和新特性开发
+                - 🚀 性能优化和Bug修复
+                - 📚 文档完善和用户支持
+
+                **🤝 其他支持方式：**
+                - ⭐ [GitHub Star](https://github.com/laochendeai/Multi-AI-Cooperative-Stock-Analysis)
+                - 🐛 问题反馈和功能建议
+                - 📢 推荐分享给朋友
+
+                *💖 每一份支持都是对开源精神的鼓励！*
+                """)
+
+                gr.Markdown("---")
+
                 gr.Markdown("### 📊 系统状态")
 
                 # 当前状态
@@ -1757,7 +1981,7 @@ if __name__ == "__main__":
     interface = create_final_ui()
     interface.launch(
         server_name="0.0.0.0",
-        server_port=7862,
+        server_port=7863,
         share=False,
         show_error=True,
         inbrowser=True
