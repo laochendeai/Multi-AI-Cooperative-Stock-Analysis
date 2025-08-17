@@ -654,10 +654,15 @@ class EnhancedTradingAgentsApp:
         stock_name = result.get('stock_name', '未知')
         report = f"""# 📊 TradingAgents 股票分析报告
 
+**项目开源地址**：https://github.com/laochendeai/Multi-AI-Cooperative-Stock-Analysis
+https://gitee.com/laochendeai/Multi-AI-Cooperative-Stock-Analysis
+**绿泡泡号**：mtj1fc
+**项目完全开源免费，我的主业弱电设计\\项目合作，欢迎大家联系。**
+
 ## 📋 基本信息
 - **股票代码**: {result['symbol']}
 - **股票名称**: {stock_name}
-- **分析时间**: {result['analysis_time']}
+- **分析深度**: {result.get('depth', result.get('analysis_depth', '标准分析'))}
 - **报告生成**: TradingAgents 多智能体协作系统
 
 ---
@@ -720,11 +725,16 @@ class EnhancedTradingAgentsApp:
         stock_name = result.get('stock_name', '未知')
         report = f"""TradingAgents 股票分析报告
 
+项目开源地址：https://github.com/laochendeai/Multi-AI-Cooperative-Stock-Analysis
+https://gitee.com/laochendeai/Multi-AI-Cooperative-Stock-Analysis
+绿泡泡号：mtj1fc
+项目完全开源免费，我的主业弱电设计\\项目合作，欢迎大家联系。
+
 基本信息
 ========
 股票代码: {result['symbol']}
 股票名称: {stock_name}
-分析时间: {result['analysis_time']}
+分析深度: {result.get('depth', result.get('analysis_depth', '标准分析'))}
 
 综合分析报告
 ============

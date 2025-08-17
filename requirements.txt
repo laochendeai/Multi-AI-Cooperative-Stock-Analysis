@@ -23,22 +23,7 @@ langchain-openai>=0.1.0
 
 # Additional dependencies for enhanced features
 psutil>=5.9.0  # For system performance monitoring
-sqlite3  # Built-in, but listed for clarity
-pathlib  # Built-in, but listed for clarity
-hashlib  # Built-in, but listed for clarity
-base64  # Built-in, but listed for clarity
-json  # Built-in, but listed for clarity
-re  # Built-in, but listed for clarity
-time  # Built-in, but listed for clarity
-datetime  # Built-in, but listed for clarity
-logging  # Built-in, but listed for clarity
-asyncio  # Built-in, but listed for clarity
-abc  # Built-in, but listed for clarity
-dataclasses  # Built-in, but listed for clarity
-pickle  # Built-in, but listed for clarity
-subprocess  # Built-in, but listed for clarity
-sys  # Built-in, but listed for clarity
-os  # Built-in, but listed for clarity
+
 
 # Optional dependencies for specific providers
 # Uncomment as needed based on your LLM providers

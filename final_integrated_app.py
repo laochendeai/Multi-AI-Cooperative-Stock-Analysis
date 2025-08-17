@@ -1086,11 +1086,15 @@ class FinalTradingAgentsApp:
 
         md_content = f"""# 📊 {symbol} 股票分析报告
 
+**项目开源地址**：https://github.com/laochendeai/Multi-AI-Cooperative-Stock-Analysis
+https://gitee.com/laochendeai/Multi-AI-Cooperative-Stock-Analysis
+**绿泡泡号**：mtj1fc
+**项目完全开源免费，我的主业弱电设计\\项目合作，欢迎大家联系。**
+
 ## 📋 基本信息
 - **股票代码**: {symbol}
-- **分析时间**: {timestamp}
 - **分析状态**: {status}
-- **分析深度**: {result.get('analysis_depth', 'N/A')}
+- **分析深度**: {result.get('depth', result.get('analysis_depth', 'N/A'))}
 - **选择的智能体**: {', '.join(result.get('selected_agents', []))}
 
 """
@@ -1182,11 +1186,15 @@ class FinalTradingAgentsApp:
         text_content = f"""TradingAgents 股票分析报告
 {'='*60}
 
+项目开源地址：https://github.com/laochendeai/Multi-AI-Cooperative-Stock-Analysis
+https://gitee.com/laochendeai/Multi-AI-Cooperative-Stock-Analysis
+绿泡泡号：mtj1fc
+项目完全开源免费，我的主业弱电设计\\项目合作，欢迎大家联系。
+
 基本信息:
 股票代码: {symbol}
-分析时间: {timestamp}
 分析状态: {status}
-分析深度: {result.get('analysis_depth', 'N/A')}
+分析深度: {result.get('depth', result.get('analysis_depth', 'N/A'))}
 选择的智能体: {', '.join(result.get('selected_agents', []))}
 
 """
@@ -1309,7 +1317,10 @@ def format_analysis_result(result: Dict[str, Any]) -> str:
         # 构建格式化输出
         output = []
         output.append(f"# 📊 {symbol} 股票分析报告")
-        output.append(f"**分析时间**: {timestamp}")
+        output.append("**项目开源地址**：https://github.com/laochendeai/Multi-AI-Cooperative-Stock-Analysis")
+        output.append("https://gitee.com/laochendeai/Multi-AI-Cooperative-Stock-Analysis")
+        output.append("**绿泡泡号**：mtj1fc")
+        output.append("**项目完全开源免费，我的主业弱电设计\\项目合作，欢迎大家联系。**")
         output.append("")
 
         # 获取结果数据
@@ -1501,80 +1512,80 @@ def create_final_ui():
                 )
 
                 # 智能体模型配置（合并选择和配置功能）
-                with gr.Accordion("🤖 智能体配置", open=False):
-                    gr.Markdown("**选择参与分析的智能体并为每个智能体配置专用模型:**")
+                gr.Markdown("### 🤖 智能体配置")
+                gr.Markdown("**选择参与分析的智能体并为每个智能体配置专用模型:**")
 
-                    # 获取模型特色信息
-                    models_with_features = app.get_models_with_features()
+                # 获取模型特色信息
+                models_with_features = app.get_models_with_features()
 
-                    # 创建模型选择选项（包含特色描述）
-                    model_choices = []
-                    for model, info in models_with_features.items():
-                        choice_text = f"{model} - {info['description']}"
-                        model_choices.append((choice_text, model))
+                # 创建模型选择选项（包含特色描述）
+                model_choices = []
+                for model, info in models_with_features.items():
+                    choice_text = f"{model} - {info['description']}"
+                    model_choices.append((choice_text, model))
 
-                    # 为每个智能体创建配置行
-                    agent_configs = {}
-                    available_agents = app.get_available_agents()
+                # 为每个智能体创建配置行
+                agent_configs = {}
+                available_agents = app.get_available_agents()
 
-                    with gr.Column():
-                        for agent in available_agents:
-                            # 获取智能体的当前配置
-                            saved_config = app.agent_model_memory.get(agent, "")
+                with gr.Column():
+                    for agent in available_agents:
+                        # 获取智能体的当前配置
+                        saved_config = app.agent_model_memory.get(agent, "")
 
-                            # 解析配置格式（可能是 "provider:model" 或 "model"）
-                            if ":" in saved_config:
-                                # 格式是 "provider:model"，提取模型名称
-                                current_model = saved_config.split(":", 1)[1]
-                            else:
-                                # 格式是纯模型名称
-                                current_model = saved_config
+                        # 解析配置格式（可能是 "provider:model" 或 "model"）
+                        if ":" in saved_config:
+                            # 格式是 "provider:model"，提取模型名称
+                            current_model = saved_config.split(":", 1)[1]
+                        else:
+                            # 格式是纯模型名称
+                            current_model = saved_config
 
-                            # 确保当前模型在可用模型列表中
-                            if current_model not in models_with_features:
-                                current_model = list(models_with_features.keys())[0] if models_with_features else ""
+                        # 确保当前模型在可用模型列表中
+                        if current_model not in models_with_features:
+                            current_model = list(models_with_features.keys())[0] if models_with_features else ""
 
-                            logger.info(f"🤖 初始化智能体 {agent} 配置: {saved_config} -> {current_model}")
+                        logger.info(f"🤖 初始化智能体 {agent} 配置: {saved_config} -> {current_model}")
 
-                            with gr.Row():
-                                # 智能体启用复选框
-                                agent_enabled = gr.Checkbox(
-                                    label=f"🤖 {agent}",
-                                    value=agent in ["market_analyst", "sentiment_analyst", "news_analyst"],
-                                    scale=2
-                                )
-
-                                # 模型选择下拉框
-                                agent_model = gr.Dropdown(
-                                    choices=model_choices,
-                                    value=current_model,  # 使用解析后的模型名称
-                                    label="选择模型",
-                                    interactive=True,
-                                    scale=4
-                                )
-
-                                # 模型特色显示
-                                model_features_display = gr.Textbox(
-                                    value=models_with_features.get(current_model, {}).get("best_for", ""),
-                                    label="适用场景",
-                                    interactive=False,
-                                    scale=2
-                                )
-
-                            agent_configs[agent] = {
-                                "enabled": agent_enabled,
-                                "model": agent_model,
-                                "features": model_features_display
-                            }
-
-                        # 保存配置按钮
                         with gr.Row():
-                            save_agent_config_btn = gr.Button("💾 保存智能体配置", variant="secondary")
-                            agent_config_status = gr.Textbox(
-                                label="配置状态",
-                                interactive=False,
-                                lines=2
+                            # 智能体启用复选框
+                            agent_enabled = gr.Checkbox(
+                                label=f"🤖 {agent}",
+                                value=agent in ["market_analyst", "sentiment_analyst", "news_analyst"],
+                                scale=2
                             )
+
+                            # 模型选择下拉框
+                            agent_model = gr.Dropdown(
+                                choices=model_choices,
+                                value=current_model,  # 使用解析后的模型名称
+                                label="选择模型",
+                                interactive=True,
+                                scale=4
+                            )
+
+                            # 模型特色显示
+                            model_features_display = gr.Textbox(
+                                value=models_with_features.get(current_model, {}).get("best_for", ""),
+                                label="适用场景",
+                                interactive=False,
+                                scale=2
+                            )
+
+                        agent_configs[agent] = {
+                            "enabled": agent_enabled,
+                            "model": agent_model,
+                            "features": model_features_display
+                        }
+
+                    # 保存配置按钮
+                    with gr.Row():
+                        save_agent_config_btn = gr.Button("💾 保存智能体配置", variant="secondary")
+                        agent_config_status = gr.Textbox(
+                            label="配置状态",
+                            interactive=False,
+                            lines=2
+                        )
 
                 # 分析按钮
                 with gr.Row():
