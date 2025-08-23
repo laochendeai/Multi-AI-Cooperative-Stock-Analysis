@@ -24,6 +24,8 @@ langchain-openai>=0.1.0
 # Additional dependencies for enhanced features
 psutil>=5.9.0  # For system performance monitoring
 
+Pillow>=10.0.0 # For image processing in qrcode_security
+segno>=1.5.0   # For QR code generation in qrcode_security
 
 # Optional dependencies for specific providers
 # Uncomment as needed based on your LLM providers

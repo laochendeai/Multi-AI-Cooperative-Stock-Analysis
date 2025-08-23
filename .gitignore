@@ -1,3 +1,7 @@
+# Generated data and exports
+/exports/
+/data/trading_data.db
+
 # TradingAgents - 安全配置
 
 # 🔐 敏感配置文件 - 包含API密钥
